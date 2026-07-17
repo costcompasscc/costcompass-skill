@@ -6,8 +6,10 @@
 # committed: the plugin is installed by copying this repo's root into a
 # versioned cache, with no uv and no lockfile resolution at install time, so
 # `bin/costcompass` needs a flat hash-pinned dependency list sitting next to it.
-# Edit `pyproject.toml` / `uv.lock` and re-run this script. Never hand-edit
-# `requirements.txt` or `VERSION`.
+# `plugin.json`'s version is the same number wearing a marketplace hat.
+# `pyproject.toml` is the one place a version is authored. Edit it (or
+# `uv.lock`) and re-run this script. Never hand-edit `requirements.txt`,
+# `VERSION`, or `plugin.json`'s version field.
 #
 #   gen-build-files.sh            regenerate
 #   gen-build-files.sh --check    fail if stale (used by run-tests.sh)
@@ -40,32 +42,57 @@ trap 'rm -rf "$STAGE"' EXIT
     --quiet \
     > "$STAGE/requirements.txt" )
 
-# Version stamp: the wrapper reports this while bootstrapping. Its venv is keyed
-# on a digest of the actual code, not on this string, so a stale VERSION is
-# cosmetic rather than a correctness bug — but it is still the number a user
-# sees, so it tracks pyproject.toml.
+# Version stamps, both tracking pyproject.toml:
+#
+#   VERSION      — what the wrapper reports while bootstrapping. Its venv is
+#                  keyed on a digest of the actual code, not on this string, so
+#                  a stale VERSION is cosmetic rather than a correctness bug —
+#                  but it is still the number a user sees.
+#   plugin.json  — what the marketplace installs under, so a stale one is worse
+#                  than cosmetic: it names the cache directory, and a bump that
+#                  missed it would ship new code at the old version.
+#
+# plugin.json is hand-authored apart from this one field, so substitute in place
+# rather than re-serializing — a json round-trip would reformat the whole file
+# and turn every future hand edit into a diff against this script's taste.
 uv run --quiet --project "$ROOT" python -c "
-import pathlib, tomllib
-p = tomllib.loads(pathlib.Path('$ROOT/pyproject.toml').read_text())
-pathlib.Path('$STAGE/VERSION').write_text(p['project']['version'] + '\n')
+import pathlib, re, tomllib
+root = pathlib.Path('$ROOT')
+stage = pathlib.Path('$STAGE')
+version = tomllib.loads((root / 'pyproject.toml').read_text())['project']['version']
+
+stage.joinpath('VERSION').write_text(version + '\n')
+
+manifest = (root / '.claude-plugin/plugin.json').read_text()
+stamped, n = re.subn(r'(\"version\"\s*:\s*)\"[^\"]*\"', r'\g<1>\"%s\"' % version, manifest, count=1)
+if n != 1:
+    raise SystemExit('gen-build-files: no \"version\" field found in .claude-plugin/plugin.json')
+stage.joinpath('plugin.json').write_text(stamped)
 "
+
+# Staged name -> path in the repo.
+GENERATED=(
+    "requirements.txt:requirements.txt"
+    "VERSION:VERSION"
+    "plugin.json:.claude-plugin/plugin.json"
+)
 
 if [[ $CHECK -eq 1 ]]; then
     status=0
-    for f in requirements.txt VERSION; do
-        diff -q "$STAGE/$f" "$ROOT/$f" >/dev/null 2>&1 || status=1
+    for entry in "${GENERATED[@]}"; do
+        diff -q "$STAGE/${entry%%:*}" "$ROOT/${entry#*:}" >/dev/null 2>&1 || status=1
     done
     if [[ $status -ne 0 ]]; then
         echo "gen-build-files: derived files are stale — they have drifted from pyproject.toml/uv.lock." >&2
         echo "                 Run: scripts/gen-build-files.sh" >&2
         exit 1
     fi
-    echo "gen-build-files: requirements.txt and VERSION are in sync"
+    echo "gen-build-files: requirements.txt, VERSION and plugin.json are in sync"
     exit 0
 fi
 
-for f in requirements.txt VERSION; do
-    cp "$STAGE/$f" "$ROOT/$f"
+for entry in "${GENERATED[@]}"; do
+    cp "$STAGE/${entry%%:*}" "$ROOT/${entry#*:}"
 done
 
 echo "gen-build-files: regenerated $(tr -d '\n' < "$ROOT/VERSION")"
