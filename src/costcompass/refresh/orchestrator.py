@@ -3,7 +3,7 @@
 # monorepo, checked out alongside this repo, at
 # ../costcompass/frontend/src/lib/refresh/orchestrator.ts,
 # ../costcompass/frontend/src/lib/refresh/credential.ts, and
-# ../costcompass/cli/macos/CostCompassKit/Sources/CostCompassKit/
+# ../costcompass/client/macos/CostCompassKit/Sources/CostCompassKit/
 #   Refresh/RefreshOrchestrator.swift.
 # See "Three relay implementations" in that repo's root CLAUDE.md;
 # `make lockstep` there enumerates the whole set across both repos.
@@ -145,7 +145,7 @@ def _resolve_credential(
 ) -> str:
     """Return the plaintext credential for an entry, or raise.
 
-    Generic: the client always tries a direct vault entry first (a pasted
+    Generic: the untrusted relay always tries a direct vault entry first (a pasted
     key). For minted credentials the App Server authors the routing on the
     entry's ``credential`` field; the CLI executes the kinds it implements
     (``oauth_mint``) and skips the rest via ``CredentialSkip`` (a keyless

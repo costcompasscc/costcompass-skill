@@ -2,7 +2,7 @@
 # reference) — semantic changes here must land in the CostCompass
 # monorepo, checked out alongside this repo, at
 # ../costcompass/frontend/src/lib/vault/jwe-compact.ts, crypto.ts,
-# and entries.ts, and ../costcompass/cli/macos/CostCompassKit/Sources/
+# and entries.ts, and ../costcompass/client/macos/CostCompassKit/Sources/
 #   CostCompassKit/Vault/JWECompact.swift + Vault.swift.
 # See "Three relay implementations" in that repo's root CLAUDE.md;
 # `make lockstep` there enumerates the whole set across both repos.

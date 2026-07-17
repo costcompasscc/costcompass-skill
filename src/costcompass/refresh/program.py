@@ -2,7 +2,7 @@
 # reference) — semantic changes here must land in the CostCompass
 # monorepo, checked out alongside this repo, at
 # ../costcompass/frontend/src/lib/refresh/program-interpreter.ts and
-# ../costcompass/cli/macos/CostCompassKit/Sources/CostCompassKit/
+# ../costcompass/client/macos/CostCompassKit/Sources/CostCompassKit/
 #   Refresh/ProgramInterpreter.swift.
 # See "Three relay implementations" in that repo's root CLAUDE.md;
 # `make lockstep` there enumerates the whole set across both repos.

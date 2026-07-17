@@ -1,6 +1,6 @@
 """OS credential-store access for the two secrets this CLI needs.
 
-Mirrors ``SecretsStore`` in the macOS app (``../costcompass/cli/macos/
+Mirrors ``SecretsStore`` in the macOS app (``../costcompass/client/macos/
 CostCompassKit/Sources/CostCompassKit/Storage/SecretsStore.swift``)
 so both clients describe the same two items the same way — but the two use
 **separate services**, so each stores its own copy and neither can silently

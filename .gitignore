@@ -1,5 +1,5 @@
 # CLI (Python + uv) build, cache, and venv artifacts — never committed.
-# Scoped to cli/ so this tree is self-contained regardless of global excludes.
+# Scoped to client/ so this tree is self-contained regardless of global excludes.
 .venv/
 __pycache__/
 *.py[cod]

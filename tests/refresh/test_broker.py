@@ -53,7 +53,7 @@ def test_flat_url_target_vector():
     # Same literals as the App Server signer
     # (backend/tests/unit/test_fetch_service.py::FLAT_VECTOR_*) and the browser
     # parseBrokerTarget — the encoded space (%20) must stay verbatim so the form
-    # the client hands the broker equals the form the App Server signed.
+    # the untrusted relay hands the broker equals the form the App Server signed.
     t = broker.parse_broker_target(
         "https://api.cloudflare.com/client/v4/graphql?since=2026-06-01%2000%3A00",
         "POST",

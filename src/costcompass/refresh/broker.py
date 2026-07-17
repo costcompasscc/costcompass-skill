@@ -3,7 +3,7 @@
 # monorepo, checked out alongside this repo, at
 # ../costcompass/frontend/src/lib/broker/client.ts,
 # ../costcompass/frontend/src/lib/refresh/plan-forward.ts, and
-# ../costcompass/cli/macos/CostCompassKit/Sources/CostCompassKit/
+# ../costcompass/client/macos/CostCompassKit/Sources/CostCompassKit/
 #   Refresh/BrokerClient.swift.
 # See "Three relay implementations" in that repo's root CLAUDE.md;
 # `make lockstep` there enumerates the whole set across both repos.

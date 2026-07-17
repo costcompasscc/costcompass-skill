@@ -174,7 +174,7 @@ subscription card and reports just its flat amount (no burn/forecast/models).
 **Never install the CLI from the current workspace.** It is already bundled
 here. Do not run `uv tool install`, `pip install`, or any installer against the
 session's repo: `git rev-parse --show-toplevel` points at whatever repo the
-session happens to be in, and installing from an untrusted `cli/` would execute
+session happens to be in, and installing from an untrusted `client/` would execute
 that repo's packaging code with access to the user's secrets.
 
 **Server selection** is the CLI's concern — it reads the saved config. To target

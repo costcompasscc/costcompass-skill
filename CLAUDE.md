@@ -13,7 +13,7 @@ is exactly one copy instead of a vendored duplicate to keep in sync.
 
 This repo is public. The CostCompass monorepo is private and is assumed to be
 checked out **alongside** this one as `../costcompass`; it symlinks this repo
-back in at `cli/plugin`. Cross-repo paths in this tree are written relative to
+back in at `client/plugin`. Cross-repo paths in this tree are written relative to
 that layout.
 
 ## Stack
@@ -63,7 +63,7 @@ scripts/gen-build-files.sh --check  # fails if stale; runs in ./run-tests.sh
   `../costcompass/backend/app/schemas/fetch.py`; the relay/interpreter logic
   comes from `../costcompass/frontend/src/lib/refresh/`. This is one of
   **three** lockstep relay implementations (browser reference, this CLI, and
-  the macOS app in `../costcompass/cli/macos/`) — the canonical
+  the macOS app in `../costcompass/client/macos/`) — the canonical
   file-correspondence table lives in that repo's root CLAUDE.md under "Three
   relay implementations (lockstep)", and each file carries a `LOCKSTEP:`
   header naming its siblings. A semantic change here must land in the other
@@ -152,8 +152,8 @@ uv run pytest       # tests only
 
 The vault decrypt is cross-checked against `jwcrypto` (an independent JOSE
 implementation) so the JWE format stays portable. The monorepo's
-`./run-tests.sh` calls this script through its `cli/plugin` symlink as its
-**cli** phase (`--cli-only` / `--no-cli`), skipping it when this repo isn't
+`./run-tests.sh` calls this script through its `client/plugin` symlink as its
+**client** phase (`--client-only` / `--no-client`), skipping it when this repo isn't
 checked out — so there is one list of test commands, not two.
 
 ## The `bin/costcompass` wrapper

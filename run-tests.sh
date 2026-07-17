@@ -5,7 +5,7 @@
 # Hermetic: httpx MockTransport, no DB, no network, no live stack. Run in the
 # repo's own uv-managed venv; `uv run` auto-syncs deps on first use.
 #
-# The CostCompass monorepo calls this script through its `cli/plugin` symlink,
+# The CostCompass monorepo calls this script through its `client/plugin` symlink,
 # so the two stay one implementation rather than two lists of test commands.
 #
 set -euo pipefail

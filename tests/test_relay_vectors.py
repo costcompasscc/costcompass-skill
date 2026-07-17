@@ -1,7 +1,7 @@
 # LOCKSTEP: CLI side of the shared golden-vector corpus. The reference
 # generator is frontend/src/lib/refresh/__tests__/relay-vectors.test.ts;
 # the macOS sibling is
-# ../costcompass/cli/macos/CostCompassKit/Tests/CostCompassKitTests/
+# ../costcompass/client/macos/CostCompassKit/Tests/CostCompassKitTests/
 #   RelayVectorsTests.swift. All three load the SAME committed corpus, so a
 # change to the browser's expected output forces this suite to conform or
 # break. The corpus is vendored under tests/vectors/relay/ (kept byte-identical

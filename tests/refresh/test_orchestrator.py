@@ -300,7 +300,7 @@ def test_oauth_mint_routing_passes_server_sentinel_and_path():
 def test_oauth_installation_grant_routing_raises_credential_skip():
     # The server routes an Organization App row to "oauth_installation_grant",
     # a kind the CLI doesn't implement — skip it cleanly (no provider knowledge
-    # in the client; it acts purely on the server-authored routing kind).
+    # in the untrusted relay; it acts purely on the server-authored routing kind).
     v = vault.Vault(
         doc={"entries": []},
         p2s=os.urandom(16),
@@ -319,7 +319,7 @@ def test_oauth_installation_grant_routing_raises_credential_skip():
 
 def test_unknown_future_kind_raises_credential_skip():
     # A kind the CLI doesn't implement (a future server-authored routing) must
-    # skip cleanly, never crash — the client acts only on kinds it knows.
+    # skip cleanly, never crash — the untrusted relay acts only on kinds it knows.
     v = vault.Vault(
         doc={"entries": []},
         p2s=os.urandom(16),
