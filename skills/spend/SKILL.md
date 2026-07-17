@@ -20,11 +20,19 @@ be a different version than this skill was written against.
 
 ## Step 1 — check you can actually do the job
 
-**Run this first, before any spend command:**
+**Run this first, before any spend command — including the `|| true`:**
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/bin/costcompass auth status --json
+${CLAUDE_PLUGIN_ROOT}/bin/costcompass auth status --json || true
 ```
+
+The `|| true` is not cargo-cult. `auth status` deliberately exits 1 when
+`ready.spend` is false, so that shell users can write
+`costcompass auth status && costcompass mtd`. You are not a shell user — you read
+`ready` out of the JSON — and without the guard the harness renders a red
+`Error: Exit code 1` above your reply, which tells the user their setup is broken
+when in fact nothing failed: the command answered the question it was asked. Keep
+the CLI's exit code as it is and swallow it here.
 
 It reports where each secret came from and whether it *works* (the vault check
 really decrypts the vault; the key check really calls the server):
@@ -52,31 +60,53 @@ Not being set up yet is the **normal first run**, not an error. The user asked
 what they're spending; the answer is "you're not set up yet, here's the two ways
 to fix it". Give them that and stop.
 
+The user needs a CostCompass **API key**, issued from their account's settings.
+Both options below assume they already hold one — so say where to get it
+**first**. Telling someone to run `auth login` and only then mentioning the key
+comes from Settings is backwards; they hit the hidden prompt with nothing to
+type.
+
+Build the settings link from the `server` field of the `auth status` output you
+just ran: strip the trailing `/api/v1` and append `/app/settings/api-keys`. That
+way the link points at whatever stack they are actually configured against
+(`https://costcompass.cc/api/v1` → `https://costcompass.cc/app/settings/api-keys`;
+a local dev stack → `http://localhost:8080/app/settings/api-keys`). Use the
+`server` value to build the URL — do not print the raw JSON it came from.
+
 **Say this, and little else:**
 
-> Authorization has not been set up. Do one of the following:
+> Authorization has not been set up.
 >
-> **1. Keychain (recommended)** — verifies the key, then stores it in your OS
-> credential store. The prompt is hidden, so run it yourself:
+> **First, get an API key** from CostCompass → Settings → API keys:
+> <server>/app/settings/api-keys
+>
+> **Then store it**, one of these two ways:
+>
+> **1. Keychain (recommended)** — verifies the key against the server, then
+> stores it in your OS credential store. Run it in a **real terminal window**,
+> not in Claude Code:
 >
 > ```
-> ! ${CLAUDE_PLUGIN_ROOT}/bin/costcompass auth login
+> ${CLAUDE_PLUGIN_ROOT}/bin/costcompass auth login
 > ```
 >
-> **2. Environment variable** — export it before launching Claude Code:
+> **2. Environment variable** — export it, then relaunch Claude Code:
 >
 > ```
 > export COSTCOMPASS_API_KEY=…
 > ```
->
-> Get a key from CostCompass → Settings → API keys.
 
-Adapt only these: append `--url <base>` to the `auth login` line if the user is
-targeting a non-default server (e.g. `http://localhost:8080/api/v1` for a local
-dev stack).
+Adapt only these: substitute the real settings URL for `<server>/app/settings/api-keys`,
+and append `--url <base>` to the `auth login` line if `server` is not the default
+(e.g. a local dev stack).
 
 **Do not**, in this message:
 
+- **Tell the user to run `auth login` with the `!` prefix.** It cannot work.
+  `!` gives the command no TTY, so `getpass` cannot suppress echo and the CLI
+  aborts rather than print the key in the clear — correct behaviour, useless
+  advice. A hidden prompt needs a real terminal window. This applies to every
+  secret-accepting command (`auth login`, `auth vault`).
 - Show or quote the `auth status --json` output. `source: null`,
   `valid: false`, and `ready.spend` are diagnostics for *you* — to the user they
   are noise that buries the two things they can actually do.
@@ -86,8 +116,7 @@ dev stack).
 - Volunteer the vault password — it is a *separate* secret and irrelevant to a
   spend question. Only raise it if they asked to refresh.
 
-Keys come from CostCompass → Settings → API keys. Never ask them to paste the
-key into the chat.
+Never ask the user to paste the key into the chat, and never echo one back.
 
 ### Fix: vault password (`ready.refresh` false)
 
@@ -100,13 +129,14 @@ fix above — two options, no diagnostics, no lecture.
 > credentials. Do one of the following:
 >
 > **1. Keychain (recommended)** — checks the password really decrypts your
-> vault, then stores it. The prompt is hidden, so run it yourself:
+> vault, then stores it. Run it in a **real terminal window**, not in Claude
+> Code:
 >
 > ```
-> ! ${CLAUDE_PLUGIN_ROOT}/bin/costcompass auth vault
+> ${CLAUDE_PLUGIN_ROOT}/bin/costcompass auth vault
 > ```
 >
-> **2. Environment variable** — export it before launching Claude Code:
+> **2. Environment variable** — export it, then relaunch Claude Code:
 >
 > ```
 > read -rs COSTCOMPASS_VAULT_PASSWORD && export COSTCOMPASS_VAULT_PASSWORD

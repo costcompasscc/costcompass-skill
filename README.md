@@ -36,11 +36,13 @@ failing obscurely.
 ## Authenticating
 
 You need an API key from CostCompass (Settings → API keys). Both prompts are
-hidden, so run these yourself with the `!` prefix — Claude can't type into them:
+hidden, so run these in a **real terminal window** — not inside Claude Code,
+whose `!` prefix gives the command no TTY, so the prompt cannot hide your
+keystrokes and the CLI refuses to run rather than echo a secret:
 
 ```
-! costcompass auth login     # your API key
-! costcompass auth vault     # your vault password, needed only for refreshing
+costcompass auth login     # your API key
+costcompass auth vault     # your vault password, needed only for refreshing
 ```
 
 Each one **verifies before it stores**: the key against the server, the password
