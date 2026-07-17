@@ -1,0 +1,25 @@
+{
+  "_comment": "GENERATED corpus — each vector's `expect` hex digest is produced from the browser reference sha256Hex (frontend/src/lib/refresh/hash.ts). Do not hand-edit `expect`; regenerate with `make gen-vectors` (UPDATE_VECTORS=1). Loaded in lockstep by all three relay test suites. See test-vectors/README.md.",
+  "vectors": [
+    {
+      "name": "empty-string",
+      "input": "",
+      "expect": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "nist-abc",
+      "input": "abc",
+      "expect": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    },
+    {
+      "name": "quantconnect-shaped",
+      "input": "apitoken:1700000000",
+      "expect": "7149567b0701eae5d8b38890b3217be83d380bd315163be11df213c580541bff"
+    },
+    {
+      "name": "unicode",
+      "input": "café 🔒 déjà",
+      "expect": "3ee296ff10f1817d35ef047930c8c058c587ff78abcdc0a743cd1a08cff9d0e0"
+    }
+  ]
+}

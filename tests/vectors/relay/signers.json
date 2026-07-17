@@ -1,0 +1,53 @@
+{
+  "_comment": "GENERATED corpus — each vector's `expect` header map is produced from the browser reference signer (frontend/src/lib/refresh/signers.ts). Do not hand-edit `expect`; regenerate with `make gen-vectors` (UPDATE_VECTORS=1). Loaded in lockstep by all three relay test suites. See test-vectors/README.md.",
+  "vectors": [
+    {
+      "name": "qc_hmac_v1-basic",
+      "input": {
+        "kind": "qc_hmac_v1",
+        "user_id": "42",
+        "authorization_header": "Authorization",
+        "authorization_scheme": "Basic",
+        "timestamp_header": "Timestamp",
+        "api_token": "apitoken",
+        "now_sec": 1700000000
+      },
+      "expect": {
+        "Authorization": "Basic NDI6NzE0OTU2N2IwNzAxZWFlNWQ4YjM4ODkwYjMyMTdiZTgzZDM4MGJkMzE1MTYzYmUxMWRmMjEzYzU4MDU0MWJmZg==",
+        "Timestamp": "1700000000"
+      }
+    },
+    {
+      "name": "qc_hmac_v1-custom-headers",
+      "input": {
+        "kind": "qc_hmac_v1",
+        "user_id": "uid-test-1",
+        "authorization_header": "X-QC-Auth",
+        "authorization_scheme": "HMAC",
+        "timestamp_header": "X-QC-Timestamp",
+        "api_token": "tok-test-secret",
+        "now_sec": 1710000000
+      },
+      "expect": {
+        "X-QC-Auth": "HMAC dWlkLXRlc3QtMTpiMGM0N2RkNzZjNTI2ZjFmY2M1OWZhODFiYjZmMDFmZjY1ZTJlYWRhMWQxODliNDU4YzVkYWNlOTU4NmRhZGFl",
+        "X-QC-Timestamp": "1710000000"
+      }
+    },
+    {
+      "name": "qc_hmac_v1-unicode-token",
+      "input": {
+        "kind": "qc_hmac_v1",
+        "user_id": "usér-π-42",
+        "authorization_header": "Authorization",
+        "authorization_scheme": "Basic",
+        "timestamp_header": "Timestamp",
+        "api_token": "tökén-🔑-secret",
+        "now_sec": 1720000000
+      },
+      "expect": {
+        "Authorization": "Basic dXPDqXItz4AtNDI6YWZjN2VmOTUyZjdjNDM3MDliMjgxMWEyMTlkMGFmYzk4Y2YyOGQ4ZGEzN2IyZDRlMDI4YWQ3YjM3MjYzODEzMw==",
+        "Timestamp": "1720000000"
+      }
+    }
+  ]
+}

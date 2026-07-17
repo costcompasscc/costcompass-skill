@@ -50,7 +50,24 @@ _CEK_SIZE = 32
 
 
 class VaultError(Exception):
-    """Vault retrieval or decryption failure (wrong password, no vault, …)."""
+    """Vault retrieval or decryption failure (wrong password, no vault, …).
+
+    ``category`` is the language-neutral outcome code the shared relay
+    golden-vector corpus asserts on (``test-vectors/relay/``): ``"wrong_password"``
+    for an indistinguishable crypto failure (bad password or tampered blob),
+    ``"unsupported_format"`` for a structural/policy rejection, and
+    ``"invalid_plaintext_json"`` for a blob that decrypts cleanly but whose
+    plaintext is not the JSON vault document. It is set explicitly at the raise
+    site rather than parsed back out of the message, so the category is a source
+    of truth, not a shadow of the wording. Mirrors the browser's error classes
+    (``InvalidPasswordError`` / ``UnsupportedFormatError`` / non-JSON plaintext)
+    and the macOS ``VaultError`` enum (``.wrongPassword`` / structural /
+    ``.invalidPlaintextJSON``).
+    """
+
+    def __init__(self, message: str, *, category: str = "unsupported_format") -> None:
+        super().__init__(message)
+        self.category = category
 
 
 # Unpadded base64url alphabet. We validate strictly before decoding so a
@@ -145,11 +162,15 @@ def decrypt_jwe(jwe: str, password: str) -> tuple[bytearray, bytes, int]:
         try:
             cek = bytearray(aes_key_unwrap(kek, enc_key))
         except Exception as exc:  # noqa: BLE001 - any unwrap failure = bad password
-            raise VaultError("could not decrypt vault (wrong password?)") from exc
+            raise VaultError(
+                "could not decrypt vault (wrong password?)", category="wrong_password"
+            ) from exc
         try:
             plaintext = bytearray(AESGCM(cek).decrypt(iv, ciphertext + tag, aad))
         except Exception as exc:  # noqa: BLE001
-            raise VaultError("could not decrypt vault (wrong password?)") from exc
+            raise VaultError(
+                "could not decrypt vault (wrong password?)", category="wrong_password"
+            ) from exc
         finally:
             _zero(cek)
     finally:
@@ -215,6 +236,28 @@ class Vault:
         return None
 
 
+def decrypt_to_doc(jwe: str, password: str) -> tuple[dict[str, Any], bytes, int]:
+    """Decrypt a JWE and parse its plaintext as the vault document.
+
+    The single decrypt-and-parse entry point, shared by ``fetch_and_decrypt``
+    and the cross-implementation golden-vector suite so every caller categorizes
+    a non-JSON plaintext identically. Mirrors the browser reference's
+    decrypt-then-``JSON.parse`` and the macOS ``Vault.decrypt`` (which parses
+    inside the same call): a valid decrypt whose plaintext is not JSON is its own
+    outcome, ``invalid_plaintext_json`` — not folded into a crypto failure.
+    """
+    plaintext, p2s, p2c = decrypt_jwe(jwe, password)
+    try:
+        doc = json.loads(plaintext)
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise VaultError(
+            "vault contents are not valid JSON", category="invalid_plaintext_json"
+        ) from exc
+    finally:
+        _zero(plaintext)
+    return doc, p2s, p2c
+
+
 def fetch_and_decrypt(client: api.Client, password: str) -> Vault:
     """GET /vault and decrypt; raises VaultError if absent or wrong password."""
     blob = client.get_vault()
@@ -222,13 +265,7 @@ def fetch_and_decrypt(client: api.Client, password: str) -> Vault:
         raise VaultError(
             "No vault found for this account — set one up in the app first."
         )
-    plaintext, p2s, p2c = decrypt_jwe(blob["jwe"], password)
-    try:
-        doc = json.loads(plaintext)
-    except (ValueError, json.JSONDecodeError) as exc:
-        raise VaultError("vault contents are not valid JSON") from exc
-    finally:
-        _zero(plaintext)
+    doc, p2s, p2c = decrypt_to_doc(blob["jwe"], password)
     return Vault(doc=doc, p2s=p2s, p2c=p2c, revision=int(blob["revision"]))
 
 

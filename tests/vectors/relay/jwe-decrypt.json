@@ -1,0 +1,154 @@
+{
+  "_comment": "GENERATED corpus — the `jwe` and `expect`/`expect_error` outcome of each vector is produced from the browser reference implementation (frontend/src/lib/vault). Do not hand-edit `jwe`/`expect`; regenerate with `make gen-vectors` (UPDATE_VECTORS=1). Loaded in lockstep by all three relay test suites. See test-vectors/README.md.",
+  "vectors": [
+    {
+      "name": "openai-single-entry",
+      "password": "test-vector-password-1",
+      "mint": {
+        "plaintext": {
+          "entries": [
+            {
+              "provider": "openai",
+              "api_key": "sk-test-123",
+              "metadata": {
+                "instance_key": ""
+              }
+            }
+          ],
+          "future_field": {
+            "nested": true
+          }
+        }
+      },
+      "jwe": "eyJhbGciOiJQQkVTMi1IUzI1NitBMTI4S1ciLCJlbmMiOiJBMjU2R0NNIiwicDJjIjo2MDAwMDAsInAycyI6IlZ5SkQxQkJ6R2hwVk90TmZ6bi01YkEifQ.ddezo3bAOTiCUl1l7sYlFL1d6UTaHh3qxraTmiG-DTbF9eenFSImXA.Y44JEeKXEcTjhfZp.La7JkNuz4Y9qGGPQmbN-96jKxxZ34XQ57HFE1-WRQ-u04XMXPeJv2W1ggpalQLFmjiiPRifLHy6JpsjrTZDS1oHmRgiuUeyFDaTiq928pmhMBDjyGsQlcJaYeH8ylXgtoJnzD2DJd5fg59vzKKDyN1T4zG8R3tMopg.ins_TthMPc61mr-SK88nig",
+      "expect": {
+        "doc": {
+          "entries": [
+            {
+              "provider": "openai",
+              "api_key": "sk-test-123",
+              "metadata": {
+                "instance_key": ""
+              }
+            }
+          ],
+          "future_field": {
+            "nested": true
+          }
+        }
+      }
+    },
+    {
+      "name": "multi-entry-unknown-fields-unicode",
+      "password": "correct horse battery staple",
+      "mint": {
+        "plaintext": {
+          "schema_version": 1,
+          "created_at": "2024-01-01T00:00:00Z",
+          "updated_at": "2024-01-01T00:00:00Z",
+          "future_field": "must survive round-trip · café 🔒",
+          "entries": [
+            {
+              "id": "1",
+              "provider": "anthropic",
+              "api_key": "sk-ant",
+              "metadata": {
+                "instance_key": ""
+              }
+            },
+            {
+              "id": "2",
+              "provider": "google",
+              "api_key": "ya29-rt",
+              "metadata": {
+                "instance_key": "__google_oauth__"
+              }
+            },
+            {
+              "id": "3",
+              "provider": "google",
+              "api_key": "proj-key",
+              "metadata": {
+                "instance_key": "proj-2"
+              }
+            }
+          ]
+        }
+      },
+      "jwe": "eyJhbGciOiJQQkVTMi1IUzI1NitBMTI4S1ciLCJlbmMiOiJBMjU2R0NNIiwicDJjIjo2MDAwMDAsInAycyI6Im9JYU5IcGgzblU1eEt4azlmYkxGQ1EifQ.fn29XeTXUL3WHt7J0cu9qQlRFNZzjlW8im1qNCGL_ttz7v0Afs7UIg.fiMzfVmODZfQTvco.GCvh4S-AfYhScjo4utp_XDuPEasYWAWDfH4HMnbMt2zHM5n8ceArzvsRHmkrOWBfVDEaF9Vhw2VdaiX_OqiPIvcPzmNdxVKjzIS-82AT_Lxc1Vr858Wxl5WmAPl9Xt20jdVVGnvsqVCDyVvE4emZhvcAUB4AuxVA5HZydGfuvWeOSP1T5z5z6UO__LfZ4YaioTDeCzS8sdBw2L46q8WBkyPHOiJe56ZPywQPI-fQeoeRX_rkUuvTWF5NkVafWLkMlIWcra6UcqfGuC7a_01m1XKDNqNfg01fHfAfSFeERPXTAoMLuqyoUOYzsvTW4cLmYwsQdL3sGPfn3JSlA6OUpHmifgIUcEp-l_nMna16PA4ao84k6_pFRgjMbDEGTiM-YlXDP62Hx1nzJQD7_FzFJ2pUOFA_LguTYU4BrE-zXOee8givQZr8McM0EXrnHQWapKAF3zh1t8hZP0Wx5OYQey2Jg5AOKpZHw7s1yMa1FlbWL5qs9La6kYvkj0jib7e8hAGYHIDqqMuQLrxR16n357R6_NEUKvRqXfxA1UbO359jHx-N-jgyRKw3uYHsFw.LHlbQQO_r7hv9pXtTUqgng",
+      "expect": {
+        "doc": {
+          "schema_version": 1,
+          "created_at": "2024-01-01T00:00:00Z",
+          "updated_at": "2024-01-01T00:00:00Z",
+          "future_field": "must survive round-trip · café 🔒",
+          "entries": [
+            {
+              "id": "1",
+              "provider": "anthropic",
+              "api_key": "sk-ant",
+              "metadata": {
+                "instance_key": ""
+              }
+            },
+            {
+              "id": "2",
+              "provider": "google",
+              "api_key": "ya29-rt",
+              "metadata": {
+                "instance_key": "__google_oauth__"
+              }
+            },
+            {
+              "id": "3",
+              "provider": "google",
+              "api_key": "proj-key",
+              "metadata": {
+                "instance_key": "proj-2"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "wrong-password",
+      "password": "wrong-password",
+      "mint": {
+        "plaintext": {
+          "entries": []
+        },
+        "password": "correct-password"
+      },
+      "jwe": "eyJhbGciOiJQQkVTMi1IUzI1NitBMTI4S1ciLCJlbmMiOiJBMjU2R0NNIiwicDJjIjo2MDAwMDAsInAycyI6IlRzeS0zRVJmMWE1cUFLc0xGOWVoS3cifQ.ljjGmDYrsT9G4y4Mfb2NMraJoqkAIZ3eAfghuwbvRWASX_dRlNyHpg.3bcdK8RP1bfWMQJd.GR5I7qfM9q2J75fby7M.aGNifk-lcChIRQzT0kd6ug",
+      "expect_error": "wrong_password"
+    },
+    {
+      "name": "below-iteration-floor",
+      "password": "test-vector-password-1",
+      "mint": {
+        "plaintext": {
+          "entries": []
+        },
+        "p2c": 1000
+      },
+      "jwe": "eyJhbGciOiJQQkVTMi1IUzI1NitBMTI4S1ciLCJlbmMiOiJBMjU2R0NNIiwicDJjIjoxMDAwLCJwMnMiOiJzSVBmYVBGbnR1YXNsZm9FcTc4RnNnIn0.tN0HSi3hg4Prkhz8M1DUTKK_qUmPAvq_2-cjVUUA362Qsz6zynhRcA._ud1ycVETPeaLM8-.xPWOD7aD5Viv8810RCY.ZDdUYMyzI4UUe3QP5gUMiQ",
+      "expect_error": "unsupported_format"
+    },
+    {
+      "name": "malformed-segment-count",
+      "password": "test-vector-password-1",
+      "jwe": "a.b.c",
+      "expect_error": "unsupported_format"
+    },
+    {
+      "name": "valid-decrypt-non-json-plaintext",
+      "password": "test-vector-password-1",
+      "mint": {
+        "raw": "this plaintext decrypts fine but is not JSON {"
+      },
+      "jwe": "eyJhbGciOiJQQkVTMi1IUzI1NitBMTI4S1ciLCJlbmMiOiJBMjU2R0NNIiwicDJjIjo2MDAwMDAsInAycyI6Ik11eDJsekZMaDQ5T1dIQ3Q1YkExancifQ.P4wvcMSZ2Zr658hiA1vdJjowyDQ9cxn6gpQ6z451FYy4A05QN_0atg.-eWotDlEK_mPE8aK.ZnoZ6y0a-wKArpZNp4trEmoRVkyZWm7Ol2Vk9NETUuVFTLYZ09Ipdn34OoQAug.9omNx23YN4didn8z3Mv_hA",
+      "expect_error": "invalid_plaintext_json"
+    }
+  ]
+}
