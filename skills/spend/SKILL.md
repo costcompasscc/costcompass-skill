@@ -48,34 +48,73 @@ stderr — expected, needs network, a few seconds.
 
 ### Fix: API key (`ready.spend` false)
 
-The API key comes from your OS credential store, or `COSTCOMPASS_API_KEY` —
-never a config file. Tell the user to pick one:
+Not being set up yet is the **normal first run**, not an error. The user asked
+what they're spending; the answer is "you're not set up yet, here's the two ways
+to fix it". Give them that and stop.
 
-1. **Store it (preferred).** The prompt is hidden, so *they* must run it — you
-   cannot type into it. Ask them to run, with the `!` prefix:
-   `! ${CLAUDE_PLUGIN_ROOT}/bin/costcompass auth login`
-   It verifies the key against the server and only then saves it to the OS
-   credential store (Keychain / Credential Manager / Secret Service).
-   Add `--url http://localhost:8080/api/v1` to target a local dev stack.
-2. **Environment variable.** Export `COSTCOMPASS_API_KEY` *before* launching
-   Claude Code, so it stays in process memory rather than a file.
+**Say this, and little else:**
+
+> Authorization has not been set up. Do one of the following:
+>
+> **1. Keychain (recommended)** — verifies the key, then stores it in your OS
+> credential store. The prompt is hidden, so run it yourself:
+>
+> ```
+> ! ${CLAUDE_PLUGIN_ROOT}/bin/costcompass auth login
+> ```
+>
+> **2. Environment variable** — export it before launching Claude Code:
+>
+> ```
+> export COSTCOMPASS_API_KEY=…
+> ```
+>
+> Get a key from CostCompass → Settings → API keys.
+
+Adapt only these: append `--url <base>` to the `auth login` line if the user is
+targeting a non-default server (e.g. `http://localhost:8080/api/v1` for a local
+dev stack).
+
+**Do not**, in this message:
+
+- Show or quote the `auth status --json` output. `source: null`,
+  `valid: false`, and `ready.spend` are diagnostics for *you* — to the user they
+  are noise that buries the two things they can actually do.
+- Lead with what's broken, a status table, or a field-by-field readout.
+- Explain the resolution order, or why the credential store beats the
+  environment. They didn't ask.
+- Volunteer the vault password — it is a *separate* secret and irrelevant to a
+  spend question. Only raise it if they asked to refresh.
 
 Keys come from CostCompass → Settings → API keys. Never ask them to paste the
 key into the chat.
 
 ### Fix: vault password (`ready.refresh` false)
 
-Refresh needs the vault password, which unlocks every provider credential.
-Tell the user to pick one, in this order:
+Only raise this if the user actually asked to refresh. Same shape as the API-key
+fix above — two options, no diagnostics, no lecture.
 
-1. **Store it (preferred).** Hidden prompt, so they run it themselves:
-   `! ${CLAUDE_PLUGIN_ROOT}/bin/costcompass auth vault`
-   It checks the password really decrypts the vault before storing it.
-2. **Environment variable.** Export `COSTCOMPASS_VAULT_PASSWORD` before
-   launching Claude Code (`read -rs` then export — never in `.zshrc`).
-3. **Config file, last resort.** `vault_password = "…"` in
-   `~/.config/costcompass/config.toml` (mode 0600). This is **plaintext on
-   disk** — offer it only if they ask, and say so plainly.
+**Say this, and little else:**
+
+> Refreshing needs your vault password, which unlocks your provider
+> credentials. Do one of the following:
+>
+> **1. Keychain (recommended)** — checks the password really decrypts your
+> vault, then stores it. The prompt is hidden, so run it yourself:
+>
+> ```
+> ! ${CLAUDE_PLUGIN_ROOT}/bin/costcompass auth vault
+> ```
+>
+> **2. Environment variable** — export it before launching Claude Code:
+>
+> ```
+> read -rs COSTCOMPASS_VAULT_PASSWORD && export COSTCOMPASS_VAULT_PASSWORD
+> ```
+
+A third option exists — `vault_password = "…"` in
+`~/.config/costcompass/config.toml` (mode 0600) — but it is **plaintext on
+disk**. Offer it only if they ask for it, and say that plainly when you do.
 
 **Never** ask the user to paste the vault password into the chat, and never
 echo, log, or store it yourself. Never pass it as a command-line argument —
