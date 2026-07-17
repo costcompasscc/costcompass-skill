@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+#
+# Run the CostCompass CLI that ships with this plugin.
+#
+# The CLI is installed into an isolated virtualenv on first use and is always
+# the copy vendored here — a `costcompass` on PATH is deliberately ignored, so
+# the skill's behaviour matches the plugin version the user installed.
+#
+# The venv cannot live beside this script: plugin roots are versioned cache
+# directories that are replaced on every update.
+#
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")/.." && pwd)"
+
+# Deliberately NOT CLAUDE_PLUGIN_DATA: in a Bash-tool process that variable
+# carries whatever plugin context the harness holds, which is not necessarily
+# this plugin — it has been observed pointing at an unrelated plugin's
+# directory, and writing there would corrupt that plugin's storage.
+DATA="${XDG_DATA_HOME:-$HOME/.local/share}/costcompass-plugin"
+
+# Content-address the venv: its name is a digest of the code that goes into it.
+#
+# Keying on VERSION instead would be a shadow state — the CLI's version does not
+# have to change when its code does, so a shipped fix could leave every existing
+# user's venv untouched and silently running the old code. Hashing the actual
+# inputs makes "is this venv current?" answerable from the source of truth, and
+# identical content anywhere may safely share one venv (the package is installed
+# into the venv, not referenced from $ROOT). cksum is POSIX; shasum is not
+# guaranteed outside macOS.
+want="$(cat "$ROOT/VERSION")"
+build="$( { cat "$ROOT/requirements.txt" "$ROOT/pyproject.toml"
+            find "$ROOT/src" -type f -name '*.py' | LC_ALL=C sort | xargs cat
+          } | cksum | cut -d' ' -f1 )"
+VENV="$DATA/venv-$build"
+
+if [[ ! -x "$VENV/bin/costcompass" ]]; then
+    # Everything the bootstrap prints goes to stderr: callers parse stdout as
+    # JSON, and a stray pip/venv notice on the first run would corrupt it.
+    {
+    mkdir -p "$DATA"
+
+    # The skill may issue several CLI calls in one turn, so two cold bootstraps
+    # can race on this venv and clobber each other. mkdir is atomic: the winner
+    # builds, the losers wait for it and then use the result. Bounded so a
+    # process killed mid-build leaves a stale lock that blocks for 60s rather
+    # than forever.
+    lock="$DATA/.lock-$build"
+    for _ in $(seq 1 120); do
+        mkdir "$lock" 2>/dev/null && trap 'rmdir "$lock" 2>/dev/null || true' EXIT && break
+        sleep 0.5
+    done
+
+    # Re-check under the lock: a build we waited on may have just finished.
+    if [[ ! -x "$VENV/bin/costcompass" ]]; then
+        echo "costcompass: preparing $want (one-time setup)…" >&2
+        # Any other venv here is built from code no copy of the plugin is
+        # pointing at any more; dropping them bounds unlimited growth across
+        # updates. Worst case is a rebuild, never wrong code.
+        for d in "$DATA"/venv-*; do
+            [[ "$d" == "$VENV" ]] || rm -rf "$d"
+        done
+
+        # Deps first, then the package: bin/costcompass appearing is what marks
+        # the venv complete, so an interrupted build is retried rather than
+        # mistaken for a good one.
+        if command -v uv >/dev/null 2>&1; then
+            # Ask for the interpreter explicitly rather than taking uv's default:
+            # uv can supply a suitable Python even when the system has none.
+            uv venv --quiet --python '>=3.11' "$VENV"
+            uv pip install --quiet --python "$VENV/bin/python" \
+                --require-hashes -r "$ROOT/requirements.txt"
+            uv pip install --quiet --python "$VENV/bin/python" --no-deps "$ROOT"
+        else
+            # No uv: we need a Python the locked dependencies actually resolve
+            # for. `python3` is 3.9 on a stock macOS, which fails deep inside pip
+            # with an unreadable error, so check before building anything.
+            py=""
+            for c in python3.13 python3.12 python3.11 python3; do
+                command -v "$c" >/dev/null 2>&1 || continue
+                if "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null; then
+                    py="$c"; break
+                fi
+            done
+            if [[ -z "$py" ]]; then
+                echo "costcompass: needs uv, or Python 3.11+ on PATH, to install its CLI." >&2
+                echo "  Easiest fix: install uv — https://docs.astral.sh/uv/getting-started/installation/" >&2
+                echo "  (uv supplies its own Python, so nothing else is needed.)" >&2
+                echo "  Alternatively install Python 3.11 or newer." >&2
+                exit 1
+            fi
+            "$py" -m venv "$VENV"
+            "$VENV/bin/pip" install --quiet --require-hashes -r "$ROOT/requirements.txt"
+            "$VENV/bin/pip" install --quiet --no-deps "$ROOT"
+        fi
+    fi
+
+    rmdir "$lock" 2>/dev/null || true
+    trap - EXIT
+    } >&2
+fi
+
+exec "$VENV/bin/costcompass" "$@"

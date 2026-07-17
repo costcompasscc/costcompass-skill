@@ -1,0 +1,15 @@
+{
+  "name": "costcompass-skill",
+  "owner": {
+    "name": "CostCompass"
+  },
+  "description": "The CostCompass plugin for Claude Code.",
+  "plugins": [
+    {
+      "name": "costcompass",
+      "source": "./",
+      "description": "Month-to-date AI and cloud spend, from the terminal.",
+      "category": "productivity"
+    }
+  ]
+}

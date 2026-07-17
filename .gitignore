@@ -1,0 +1,23 @@
+# CLI (Python + uv) build, cache, and venv artifacts — never committed.
+# Scoped to cli/ so this tree is self-contained regardless of global excludes.
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Test / lint / coverage caches and reports
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Packaging output
+dist/
+build/
+
+# Local tool config is per-developer and lives in ~/.config/costcompass/,
+# but guard against an accidental in-tree copy holding an API key.
+config.toml
+.env
