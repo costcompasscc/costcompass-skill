@@ -97,7 +97,14 @@ class OAuthBrokerClient:
             raise OAuthError(
                 f"oauth mint failed ({resp.status_code})", status=resp.status_code
             )
-        return resp.json()
+        try:
+            return resp.json()
+        except ValueError as exc:
+            # A 2xx with a non-JSON body (proxy page, redirect) is broker-side
+            # breakage, not a credential problem — 502, and never echo the body.
+            raise OAuthError(
+                "oauth-broker returned a non-JSON response", status=502
+            ) from exc
 
 
 class OAuthResolver:

@@ -41,6 +41,10 @@ from . import api
 PBES2_ALG = "PBES2-HS256+A128KW"
 ENC_ALG = "A256GCM"
 MIN_PBKDF2_ITERS = 600_000
+# Ceiling mirrors the browser reference (`parseJwe`: p2c must be a positive
+# 32-bit integer). Also a CPU guard: without it a tampered header could demand
+# an arbitrarily large PBKDF2 run before the tag check gets a chance to fail.
+MAX_PBKDF2_ITERS = 0xFFFF_FFFF
 DEFAULT_PBKDF2_ITERS = 600_000
 _P2S_SIZE = 16
 _IV_SIZE = 12
@@ -135,8 +139,8 @@ def decrypt_jwe(jwe: str, password: str) -> tuple[bytearray, bytes, int]:
     if header.get("alg") != PBES2_ALG or header.get("enc") != ENC_ALG:
         raise VaultError("unsupported vault algorithm")
     p2c = header.get("p2c")
-    if not isinstance(p2c, int) or p2c < MIN_PBKDF2_ITERS:
-        raise VaultError("vault iteration count is invalid or below the floor")
+    if not isinstance(p2c, int) or not MIN_PBKDF2_ITERS <= p2c <= MAX_PBKDF2_ITERS:
+        raise VaultError("vault iteration count is invalid or out of range")
     p2s_raw = header.get("p2s")
     if not isinstance(p2s_raw, str):
         raise VaultError("vault header is missing p2s")

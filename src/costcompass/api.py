@@ -48,7 +48,8 @@ class Client:
         *,
         params: dict[str, Any] | None = None,
         json: Any | None = None,
-    ) -> httpx.Response:
+        none_on_404: bool = False,
+    ) -> httpx.Response | None:
         url = f"{self.base_url}{path}"
         try:
             resp = self._http.request(
@@ -56,6 +57,8 @@ class Client:
             )
         except httpx.RequestError as exc:
             raise ApiError(f"Could not reach {self.base_url}: {exc}") from exc
+        if none_on_404 and resp.status_code == 404:
+            return None
         if resp.status_code in (401, 403):
             raise ApiError("Invalid or expired API key.")
         if resp.status_code >= 400:
@@ -64,47 +67,66 @@ class Client:
             # body could carry sensitive content. The status + endpoint is
             # enough for the user to act on.
             raise ApiError(f"{method} {path} failed ({resp.status_code})")
+        if 300 <= resp.status_code < 400:
+            # httpx does not follow redirects; a 3xx here means the configured
+            # URL is not the API base (e.g. an http→https or trailing-path
+            # redirect). Say so instead of choking on the empty body.
+            raise ApiError(
+                f"{method} {path} was redirected ({resp.status_code}) — "
+                "check that the server URL points at the API base "
+                "(e.g. https://host/api/v1)."
+            )
         return resp
+
+    def _json(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json: Any | None = None,
+    ) -> Any:
+        resp = self._request(method, path, params=params, json=json)
+        assert resp is not None  # none_on_404 not used on this path
+        try:
+            return resp.json()
+        except ValueError as exc:
+            # Body stays unechoed for the same reason as error bodies above.
+            raise ApiError(f"{method} {path} returned a non-JSON response") from exc
 
     # --- read endpoints -------------------------------------------------
 
     def me(self) -> dict[str, Any]:
-        return self._request("GET", "/me").json()
+        return self._json("GET", "/me")
 
     def summary(self, provider: str | None = None) -> dict[str, Any]:
         params = {"provider": provider} if provider else None
-        return self._request("GET", "/dashboard/summary", params=params).json()
+        return self._json("GET", "/dashboard/summary", params=params)
 
     def breakdown(self) -> list[dict[str, Any]]:
-        return self._request("GET", "/dashboard/breakdown").json()
+        return self._json("GET", "/dashboard/breakdown")
 
     def providers(self) -> list[dict[str, Any]]:
-        return self._request("GET", "/providers").json()
+        return self._json("GET", "/providers")
 
     # --- vault ----------------------------------------------------------
 
     def get_vault(self) -> dict[str, Any] | None:
         """Return {jwe, revision, updated_at}, or None if no vault exists."""
-        url = f"{self.base_url}/vault"
-        try:
-            resp = self._http.request("GET", url, headers=self._headers)
-        except httpx.RequestError as exc:
-            raise ApiError(f"Could not reach {self.base_url}: {exc}") from exc
-        if resp.status_code == 404:
+        resp = self._request("GET", "/vault", none_on_404=True)
+        if resp is None:
             return None
-        if resp.status_code in (401, 403):
-            raise ApiError("Invalid or expired API key.")
-        if resp.status_code >= 400:
-            # Secret-adjacent endpoint: status only, never the body.
-            raise ApiError(f"GET /vault failed ({resp.status_code})")
-        return resp.json()
+        try:
+            return resp.json()
+        except ValueError as exc:
+            raise ApiError("GET /vault returned a non-JSON response") from exc
 
     def put_vault(self, jwe: str, expected_revision: int) -> dict[str, Any]:
-        return self._request(
+        return self._json(
             "PUT",
             "/vault",
             json={"jwe": jwe, "expected_revision": expected_revision},
-        ).json()
+        )
 
     # --- fetch runs -----------------------------------------------------
 
@@ -116,14 +138,12 @@ class Client:
         body: dict[str, Any] = {"providers": providers}
         if instance_key is not None:
             body["instance_key"] = instance_key
-        return self._request("POST", "/fetch-runs", json=body).json()
+        return self._json("POST", "/fetch-runs", json=body)
 
     def submit_responses(self, run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._request(
-            "POST", f"/fetch-runs/{run_id}/responses", json=payload
-        ).json()
+        return self._json("POST", f"/fetch-runs/{run_id}/responses", json=payload)
 
     def finalize_run(self, run_id: str, cancelled: bool = False) -> dict[str, Any]:
-        return self._request(
+        return self._json(
             "POST", f"/fetch-runs/{run_id}/finalize", json={"cancelled": cancelled}
-        ).json()
+        )

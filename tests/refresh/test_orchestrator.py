@@ -512,6 +512,94 @@ def test_oauth_mint_failure_preserves_status():
     assert result.outcomes[0].state == "rate_limited"
 
 
+def test_oauth_mint_failure_purpose_falls_back_when_plan_has_none():
+    # ``request_purpose`` is a required wire field. A plan that carries no
+    # purpose anywhere must relay the hard fallback (mirroring the browser's
+    # ``?? "missing_credentials"``), never an empty string.
+    blob = _vault_blob(
+        [
+            {
+                "id": "g",
+                "provider": "google",
+                "api_key": "rt",
+                "metadata": {"instance_key": "__google_oauth__"},
+            }
+        ]
+    )
+    run = {
+        "run_id": "run-1",
+        "fetches": [
+            {
+                "provider_id": "google",
+                "instance_key": "proj-1",
+                "state": "pending",
+                "signing_token": "tok-1",
+                "credential": {
+                    "kind": "oauth_mint",
+                    "sentinel_key": "__google_oauth__",
+                    "mint_path": "/google/mint",
+                },
+                "plan": {
+                    # No "purpose" on the request, and no program.
+                    "requests": [
+                        {
+                            "url": "https://h/p",
+                            "method": "GET",
+                            "headers": {},
+                            "body": None,
+                        }
+                    ],
+                    "auth_header": "authorization",
+                    "auth_scheme": "Bearer",
+                },
+            }
+        ],
+    }
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        p, m = request.url.path, request.method
+        if m == "GET" and p.endswith("/vault"):
+            return httpx.Response(
+                200, json={"jwe": blob, "revision": 1, "updated_at": "x"}
+            )
+        if m == "POST" and p.endswith("/fetch-runs"):
+            return httpx.Response(200, json=run)
+        if "/responses" in p:
+            api_handler.submitted = json.loads(request.content)
+            return httpx.Response(200, json={"state": "failed", "events_ingested": 0})
+        if "/finalize" in p:
+            return httpx.Response(
+                200, json={"run_id": "run-1", "status": "x", "providers": []}
+            )
+        if p.endswith("/dashboard/summary"):
+            return httpx.Response(200, json={"mtd_usd": 0.0})
+        return httpx.Response(404)
+
+    client = api.Client(
+        "https://x/api/v1",
+        "sk",
+        http=httpx.Client(transport=httpx.MockTransport(api_handler)),
+    )
+    oauth_client = oauth.OAuthBrokerClient(
+        "https://x/oauth/v1",
+        "sk",
+        http=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(429))),
+    )
+    cfg = config.Config(api_key="sk", api_url="https://x/api/v1")
+    orchestrator.run(
+        cfg,
+        "sk",
+        None,
+        PASSWORD,
+        client=client,
+        broker=object(),
+        oauth_client=oauth_client,
+        echo=lambda *_: None,
+    )
+    r = api_handler.submitted["responses"][0]
+    assert r["request_purpose"] == "missing_credentials"
+
+
 def test_oauth_mint_409_marks_body_reauth_required():
     # A 409 mint rejection (dead OAuth grant) must relay a body carrying the
     # reauth_required code so the App Server's shared reauth classifier fires.

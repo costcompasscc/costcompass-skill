@@ -21,6 +21,7 @@ The config file lives at ``$XDG_CONFIG_HOME/costcompass/config.toml``
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -142,21 +143,48 @@ def _toml_str(value: str) -> str:
     return f'"{escaped}"'
 
 
+# The api_url line in the root table. Anchored to line start so it can be
+# swapped textually without re-serializing (and thereby corrupting) anything
+# else the user put in the file.
+_API_URL_LINE = re.compile(r"^[ \t]*api_url[ \t]*=.*(?:\n|$)", re.MULTILINE)
+
+
 def save_api_url(api_url: str) -> Path:
-    """Persist the (non-secret) server URL, preserving any other settings."""
-    data = _read_file(config_path())
-    data["api_url"] = api_url.rstrip("/")
-    return _write(data)
+    """Persist the (non-secret) server URL, preserving any other settings.
+
+    Edits the file textually — replace the existing ``api_url`` line, else
+    prepend one — rather than parse-and-rewrite: a rewrite would ``str()``
+    every value, so a hand-added table, bool, or comment would be corrupted or
+    dropped. Prepending keeps the key in the root table even if the file grows
+    a ``[section]`` later. A file that does not parse as TOML is replaced
+    outright, matching ``_read_file``'s treatment of corrupt configs.
+    """
+    line = f"api_url = {_toml_str(api_url.rstrip('/'))}\n"
+    text = ""
+    path = config_path()
+    if path.exists():
+        try:
+            raw = path.read_text()
+            tomllib.loads(raw)
+            text = raw
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+            text = ""
+    if _API_URL_LINE.search(text):
+        # Lambda replacement: the new line is literal text, not a template
+        # (a backslash in the URL must not be parsed as a group reference).
+        text = _API_URL_LINE.sub(lambda _m: line, text, count=1)
+    else:
+        text = line + text
+    return _write_text(text)
 
 
-def _write(data: dict) -> Path:
+def _write_text(content: str) -> Path:
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    lines = [f"{k} = {_toml_str(str(v))}\n" for k, v in sorted(data.items())]
     # O_CREAT with mode 0o600: the file may carry vault_password, so it must
     # never be even briefly world-readable.
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as fh:
-        fh.write("".join(lines))
+        fh.write(content)
     os.chmod(path, 0o600)
     return path

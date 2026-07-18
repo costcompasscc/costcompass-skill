@@ -136,6 +136,12 @@
       "expect_error": "unsupported_format"
     },
     {
+      "name": "above-iteration-cap",
+      "password": "test-vector-password-1",
+      "jwe": "eyJhbGciOiJQQkVTMi1IUzI1NitBMTI4S1ciLCJlbmMiOiJBMjU2R0NNIiwicDJjIjo0Mjk0OTY3Mjk2LCJwMnMiOiJBQUVDQXdRRkJnY0lDUW9MREEwT0R3In0.AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ.AgICAgICAgICAgIC.AwMDAwMDAwMDAwMDAwMDAwMDAw.BAQEBAQEBAQEBAQEBAQEBA",
+      "expect_error": "unsupported_format"
+    },
+    {
       "name": "malformed-segment-count",
       "password": "test-vector-password-1",
       "jwe": "a.b.c",

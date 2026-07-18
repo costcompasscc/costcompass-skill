@@ -100,6 +100,24 @@ def test_mint_5xx_preserves_status():
     assert exc.value.status == 503
 
 
+def test_mint_non_json_success_is_transient_502():
+    # A 2xx with a non-JSON body (proxy page) is broker-side breakage — a
+    # clean 502 OAuthError, never a raw ValueError, and never echoing the body.
+    client = oauth.OAuthBrokerClient(
+        "https://x/oauth/v1",
+        "sk",
+        http=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda r: httpx.Response(200, text="<html>proxy says hi</html>")
+            )
+        ),
+    )
+    with pytest.raises(oauth.OAuthError) as exc:
+        client.mint("/google/mint", "rt")
+    assert exc.value.status == 502
+    assert "proxy says hi" not in str(exc.value)
+
+
 def test_mint_network_error_is_transient_502():
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("down", request=request)

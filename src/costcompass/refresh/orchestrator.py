@@ -347,7 +347,12 @@ def _process_entry(
             instance,
             [
                 provider_error_response(
-                    exc.status, _entry_purpose(plan), str(exc), error_code=error_code
+                    exc.status,
+                    # Hard fallback: request_purpose is a required wire field
+                    # (mirrors the browser's `?? "missing_credentials"`).
+                    _entry_purpose(plan) or "missing_credentials",
+                    str(exc),
+                    error_code=error_code,
                 )
             ],
             fallback_state="failed",

@@ -319,6 +319,13 @@ def test_refresh_json_forces_quiet_and_emits_payload(clean_env, monkeypatch):
 from costcompass import secrets  # noqa: E402
 
 
+@pytest.fixture
+def tty_stdin(monkeypatch):
+    """Secret-storing prompts refuse without a TTY; fake one so CliRunner's
+    piped ``input=`` reaches the hidden prompt."""
+    monkeypatch.setattr(main, "_stdin_isatty", lambda: True)
+
+
 def _client(*, key_valid=True):
     class FakeClient:
         def __init__(self, base_url, api_key, *a, **k):
@@ -339,7 +346,7 @@ def _client(*, key_valid=True):
 
 
 def test_auth_login_rejects_invalid_key_and_stores_nothing(
-    clean_env, fake_store, monkeypatch
+    tty_stdin, clean_env, fake_store, monkeypatch
 ):
     monkeypatch.setattr(main.api, "Client", _client(key_valid=False))
     result = runner.invoke(main.app, ["auth", "login"], input="not-a-real-key\n")
@@ -351,7 +358,9 @@ def test_auth_login_rejects_invalid_key_and_stores_nothing(
     assert not config.config_path().exists(), "a secret reached the config file"
 
 
-def test_auth_login_does_not_echo_the_rejected_secret(clean_env, monkeypatch):
+def test_auth_login_does_not_echo_the_rejected_secret(
+    tty_stdin, clean_env, monkeypatch
+):
     monkeypatch.setattr(main.api, "Client", _client(key_valid=False))
     secret = "hunter2-vault-pw"
     result = runner.invoke(main.app, ["auth", "login"], input=f"{secret}\n")
@@ -359,7 +368,7 @@ def test_auth_login_does_not_echo_the_rejected_secret(clean_env, monkeypatch):
 
 
 def test_auth_login_stores_a_valid_key_in_the_credential_store(
-    clean_env, fake_store, monkeypatch
+    tty_stdin, clean_env, fake_store, monkeypatch
 ):
     monkeypatch.setattr(main.api, "Client", _client())
     result = runner.invoke(main.app, ["auth", "login"], input="sk-good\n")
@@ -371,7 +380,7 @@ def test_auth_login_stores_a_valid_key_in_the_credential_store(
     assert "sk-good" not in body
 
 
-def test_auth_login_verifies_against_the_url_flag(clean_env, monkeypatch):
+def test_auth_login_verifies_against_the_url_flag(tty_stdin, clean_env, monkeypatch):
     seen = {}
 
     class FakeClient(_client()):
@@ -390,7 +399,7 @@ def test_auth_login_verifies_against_the_url_flag(clean_env, monkeypatch):
 
 
 def test_auth_vault_rejects_a_password_that_does_not_decrypt(
-    clean_env, fake_store, monkeypatch
+    tty_stdin, clean_env, fake_store, monkeypatch
 ):
     fake_store.write(secrets.SecretItem.API_KEY, "sk-good")
     monkeypatch.setattr(main.api, "Client", _client())
@@ -405,7 +414,9 @@ def test_auth_vault_rejects_a_password_that_does_not_decrypt(
     assert fake_store.read(secrets.SecretItem.VAULT_PASSWORD) is None
 
 
-def test_auth_vault_stores_a_password_that_decrypts(clean_env, fake_store, monkeypatch):
+def test_auth_vault_stores_a_password_that_decrypts(
+    tty_stdin, clean_env, fake_store, monkeypatch
+):
     fake_store.write(secrets.SecretItem.API_KEY, "sk-good")
     monkeypatch.setattr(main.api, "Client", _client())
     monkeypatch.setattr(main.vault_mod, "fetch_and_decrypt", lambda c, p: object())
@@ -413,6 +424,27 @@ def test_auth_vault_stores_a_password_that_decrypts(clean_env, fake_store, monke
 
     assert result.exit_code == 0
     assert fake_store.read(secrets.SecretItem.VAULT_PASSWORD) == "right-pw"
+
+
+# Without a TTY the hidden prompt would fall back to reading stdin with echo
+# (getpass's pipe behaviour) — a secret-storing command must refuse instead.
+# No tty_stdin fixture here: CliRunner's fake stdin is genuinely not a TTY.
+
+
+def test_auth_login_refuses_without_a_tty(clean_env, fake_store, monkeypatch):
+    monkeypatch.setattr(main.api, "Client", _client())
+    result = runner.invoke(main.app, ["auth", "login"], input="sk-good\n")
+    assert result.exit_code != 0
+    assert "terminal" in result.output
+    assert fake_store.read(secrets.SecretItem.API_KEY) is None
+
+
+def test_auth_vault_refuses_without_a_tty(clean_env, fake_store, monkeypatch):
+    fake_store.write(secrets.SecretItem.API_KEY, "sk-good")
+    monkeypatch.setattr(main.api, "Client", _client())
+    result = runner.invoke(main.app, ["auth", "vault"], input="right-pw\n")
+    assert result.exit_code != 0
+    assert fake_store.read(secrets.SecretItem.VAULT_PASSWORD) is None
 
 
 def test_auth_status_json_reports_sources_and_readiness(
@@ -458,7 +490,7 @@ def test_auth_status_refresh_not_ready_without_vault(
 
 def test_auth_status_reports_a_plaintext_file_source(clean_env, monkeypatch):
     monkeypatch.setenv(config.ENV_API_KEY, "sk-good")
-    config._write({"vault_password": "pw"})
+    config._write_text('vault_password = "pw"\n')
     monkeypatch.setattr(main.api, "Client", _client())
     monkeypatch.setattr(main.vault_mod, "fetch_and_decrypt", lambda c, p: object())
 

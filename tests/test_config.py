@@ -43,6 +43,45 @@ def test_save_api_url_preserves_other_settings(xdg):
     assert config.resolve_api_url() == "https://new.example/api/v1"
 
 
+def test_save_api_url_preserves_comments_and_non_string_values(xdg):
+    # The rewrite is textual, so hand-added comments, non-string values, and
+    # tables must survive verbatim (a parse-and-rewrite would str() them into
+    # invalid or corrupted TOML).
+    body = (
+        "# my note\n"
+        'vault_password = "pw"\n'
+        "some_flag = true\n"
+        'api_url = "https://old.example/api/v1"\n'
+        "[future_section]\n"
+        "nested = 1\n"
+    )
+    _write_config(xdg, body)
+    config.save_api_url("https://new.example/api/v1")
+    text = config.config_path().read_text()
+    assert "# my note" in text
+    assert "some_flag = true" in text
+    assert "[future_section]" in text
+    assert "nested = 1" in text
+    assert 'api_url = "https://new.example/api/v1"' in text
+    assert "old.example" not in text
+    assert config.resolve_api_url() == "https://new.example/api/v1"
+
+
+def test_save_api_url_lands_in_root_table_despite_sections(xdg):
+    # Prepend, not append: an appended line would fall inside the last
+    # [section] and vanish from the root-table lookup.
+    _write_config(xdg, "[future_section]\nnested = 1\n")
+    config.save_api_url("https://new.example/api/v1")
+    assert config.resolve_api_url() == "https://new.example/api/v1"
+
+
+def test_save_api_url_replaces_a_corrupt_file(xdg):
+    # Matches _read_file: a file that doesn't parse is treated as absent.
+    _write_config(xdg, "this is not valid toml {{{\n")
+    config.save_api_url("https://new.example/api/v1")
+    assert config.resolve_api_url() == "https://new.example/api/v1"
+
+
 def test_config_file_is_0600(xdg):
     path = config.save_api_url("https://x.example/api/v1")
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
@@ -122,8 +161,14 @@ def test_vault_absent_everywhere(xdg, fake_store):
 
 def test_toml_escaping_roundtrip(xdg, fake_store):
     weird = 'pw-"quote"\\back'
-    config._write({"vault_password": weird})
+    config._write_text(f"vault_password = {config._toml_str(weird)}\n")
     assert config.resolve_vault_password(fake_store).value == weird
+
+
+def test_save_api_url_escaping_roundtrip(xdg):
+    weird = 'https://x.example/api/v1?a="q"\\b'
+    config.save_api_url(weird)
+    assert config.resolve_api_url() == weird
 
 
 # --- No usable backend is a fallback, not a crash -------------------------

@@ -65,6 +65,30 @@ def _fail(message: str) -> None:
     raise typer.Exit(1)
 
 
+def _stdin_isatty() -> bool:
+    """Seam for tests; CliRunner's fake stdin is never a TTY."""
+    return sys.stdin.isatty()
+
+
+def _prompt_secret(label: str) -> str:
+    """Hidden prompt for a secret that is about to be *stored*.
+
+    Refuses outright without a TTY: click's hidden prompt falls back to
+    ``getpass``, which on a pipe reads stdin with echo (plus a warning) rather
+    than aborting — and a secret-storing command must never take its input
+    where it could be echoed or logged. The refresh path is different on
+    purpose: ``_read_vault_password`` accepts piped stdin because it only
+    *uses* the password, and piping is how a script supplies it.
+    """
+    if not _stdin_isatty():
+        _fail(
+            f"{label} must be typed at a hidden interactive prompt — run this "
+            "command in a real terminal window. (To go env-var instead, see "
+            "`costcompass auth status`.)"
+        )
+    return typer.prompt(label, hide_input=True)
+
+
 def _read_vault_password() -> str:
     """Obtain the vault password without ever reading it from argv.
 
@@ -299,7 +323,7 @@ def auth_login(
     ),
 ) -> None:
     """Verify an API key and store it in the OS credential store."""
-    key = typer.prompt("API key", hide_input=True)
+    key = _prompt_secret("API key")
     # Verify BEFORE storing, against the server the key will actually be used
     # against. A secret that does not work is a secret that was mistyped, and
     # storing it only hides the mistake until later.
@@ -321,7 +345,7 @@ def auth_vault() -> None:
         key = cfg.require_key()
     except config.ConfigError as exc:
         _fail(str(exc))
-    password = typer.prompt("Vault password", hide_input=True)
+    password = _prompt_secret("Vault password")
     # Prove it actually decrypts the vault before storing it. This is the check
     # whose absence let a mistyped secret be persisted and reported as success.
     try:

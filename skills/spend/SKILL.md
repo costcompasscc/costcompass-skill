@@ -103,10 +103,11 @@ and append `--url <base>` to the `auth login` line if `server` is not the defaul
 **Do not**, in this message:
 
 - **Tell the user to run `auth login` with the `!` prefix.** It cannot work.
-  `!` gives the command no TTY, so `getpass` cannot suppress echo and the CLI
-  aborts rather than print the key in the clear — correct behaviour, useless
-  advice. A hidden prompt needs a real terminal window. This applies to every
-  secret-accepting command (`auth login`, `auth vault`).
+  `!` gives the command no TTY, and the CLI refuses to take a secret without
+  one (a hidden prompt can't suppress echo on a pipe), so it aborts rather
+  than read the key in the clear — correct behaviour, useless advice. A hidden
+  prompt needs a real terminal window. This applies to every secret-storing
+  command (`auth login`, `auth vault`).
 - Show or quote the `auth status --json` output. `source: null`,
   `valid: false`, and `ready.spend` are diagnostics for *you* — to the user they
   are noise that buries the two things they can actually do.

@@ -42,12 +42,16 @@ if [[ ! -x "$VENV/bin/costcompass" ]]; then
 
     # The skill may issue several CLI calls in one turn, so two cold bootstraps
     # can race on this venv and clobber each other. mkdir is atomic: the winner
-    # builds, the losers wait for it and then use the result. Bounded so a
-    # process killed mid-build leaves a stale lock that blocks for 60s rather
-    # than forever.
+    # builds, the losers wait for it and then use the result. The wait must
+    # comfortably exceed a worst-case cold build (venv + wheel downloads on a
+    # slow network can pass a minute) — a waiter that gives up early would start
+    # a second concurrent build of the same venv, which is exactly the clobber
+    # this lock exists to prevent. 10 minutes; a process killed mid-build
+    # leaves a stale lock that delays the next run by that bound, not forever.
     lock="$DATA/.lock-$build"
-    for _ in $(seq 1 120); do
-        mkdir "$lock" 2>/dev/null && trap 'rmdir "$lock" 2>/dev/null || true' EXIT && break
+    locked=0
+    for _ in $(seq 1 1200); do
+        mkdir "$lock" 2>/dev/null && locked=1 && trap 'rmdir "$lock" 2>/dev/null || true' EXIT && break
         sleep 0.5
     done
 
@@ -95,8 +99,13 @@ if [[ ! -x "$VENV/bin/costcompass" ]]; then
         fi
     fi
 
-    rmdir "$lock" 2>/dev/null || true
-    trap - EXIT
+    # Only the process that actually acquired the lock may release it — a
+    # timed-out waiter removing someone else's lock would let a third process
+    # start building mid-build.
+    if [[ "$locked" == 1 ]]; then
+        rmdir "$lock" 2>/dev/null || true
+        trap - EXIT
+    fi
     } >&2
 fi
 

@@ -83,6 +83,18 @@ def test_below_iteration_floor_rejected():
         vault.decrypt_jwe(blob, PASSWORD)
 
 
+def test_above_iteration_cap_rejected(jwe_blob):
+    # A real blob with >2^32 iterations can't feasibly be minted, so tamper a
+    # valid header instead. The cap (mirroring the browser's 32-bit p2c bound)
+    # must reject during header validation — before any PBKDF2 work runs.
+    parts = jwe_blob.split(".")
+    header = json.loads(vault._b64u_decode(parts[0]))
+    header["p2c"] = vault.MAX_PBKDF2_ITERS + 1
+    parts[0] = vault._b64u_encode(json.dumps(header).encode())
+    with pytest.raises(vault.VaultError, match="iteration"):
+        vault.decrypt_jwe(".".join(parts), PASSWORD)
+
+
 def _lift_jwcrypto_iter_cap(monkeypatch):
     # jwcrypto ships a conservative default max p2c below our 600k floor;
     # raise it so the library will round-trip a spec-compliant blob.
