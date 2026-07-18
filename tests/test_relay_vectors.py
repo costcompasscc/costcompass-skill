@@ -13,6 +13,7 @@ identically to the browser reference for every committed vector."""
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 from pathlib import Path
@@ -20,7 +21,9 @@ from pathlib import Path
 import pytest
 
 from costcompass import vault
+from costcompass.refresh import program as program_mod
 from costcompass.refresh import signers
+from costcompass.refresh.broker import BrokerError
 
 _CORPUS = Path(__file__).parent / "vectors" / "relay"
 
@@ -92,3 +95,99 @@ def test_sha256_vector(vec: dict) -> None:
     # Mirrors the exact digest signers.py computes inline
     # (hashlib.sha256(...).hexdigest() over UTF-8 bytes).
     assert hashlib.sha256(vec["input"].encode("utf-8")).hexdigest() == vec["expect"]
+
+
+# --- Program interpreter ----------------------------------------------------
+# Feed each vector's broker_script at the CLI's mock seam (BrokerClient.forward)
+# and assert the NORMALIZED outbound forward sequence + relayed/provider-error
+# responses match the browser-generated `expect`. The macOS sibling drives the
+# same corpus through its transport seam; all three must produce this shape.
+
+_PROGRAM = _load("program.json")
+
+
+class _CapturingBroker:
+    """Replays a vector's scripted broker outcomes in order and records every
+    forward request it saw (the CLI analog of the browser's scriptedBroker)."""
+
+    def __init__(self, script: list[dict]) -> None:
+        self._script = script
+        self._i = 0
+        self.requests: list[dict] = []
+
+    def forward(self, request: dict) -> dict:
+        self.requests.append(request)
+        entry = self._script[self._i]
+        self._i += 1
+        if entry.get("fail") == "broker_error":
+            raise BrokerError(entry["code"], entry["http_status"], entry["message"])
+        return {
+            "status": entry["status"],
+            "headers": entry["headers"],
+            "body": entry["body_b64"],
+            "signature": entry.get("signature"),
+        }
+
+
+def _norm_request(req: dict) -> dict:
+    target = req["target"]
+    return {
+        "method": target["method"],
+        "host": target["host"],
+        "path": target["path"],
+        "query": target.get("query", ""),
+        "headers": req["headers"],
+        "body": req.get("body"),
+        "signing_token": req.get("signing_token"),
+        "req_sig": req.get("req_sig"),
+    }
+
+
+def _norm_response(resp: dict) -> dict:
+    # A provider-error carries a per-impl sentinel host; pin status + decoded
+    # error only (the sentinel URL and the raw body-JSON spacing are per-impl).
+    if resp["request_url"].startswith("cc-internal://"):
+        parsed = json.loads(base64.b64decode(resp["body_b64"]))
+        return {"kind": "provider_error", "status": resp["status"], "error": parsed["error"]}
+    return {
+        "kind": "relayed",
+        "status": resp["status"],
+        "request_url": resp["request_url"],
+        "request_purpose": resp["request_purpose"],
+        "body_b64": resp["body_b64"],
+        "signature": resp.get("signature"),
+        "headers": resp["headers"],
+    }
+
+
+def _clock(vec: dict):
+    # Successive authored values, the last repeating; a constant 0 when absent
+    # (a positive deadline_ms then never trips) — matches the browser/macOS.
+    clock = vec.get("clock")
+    if clock is None:
+        return lambda: 0.0
+    idx = [0]
+
+    def now() -> float:
+        i = min(idx[0], len(clock) - 1)
+        idx[0] += 1
+        return float(clock[i])
+
+    return now
+
+
+@pytest.mark.parametrize("vec", _PROGRAM, ids=_ids(_PROGRAM))
+def test_program_vector(vec: dict) -> None:
+    broker = _CapturingBroker(vec["broker_script"])
+    out = program_mod.run_program(
+        vec["program"],
+        vec["auth_headers"],
+        vec.get("signing_token"),
+        broker,
+        now=_clock(vec),
+    )
+    got = {
+        "requests": [_norm_request(r) for r in broker.requests],
+        "responses": [_norm_response(r) for r in out],
+    }
+    assert got == vec["expect"]

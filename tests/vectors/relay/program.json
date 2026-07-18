@@ -1,0 +1,587 @@
+{
+  "_comment": "GENERATED corpus — each vector's `expect` (normalized outbound forward sequence + relayed/provider-error responses) is produced by running the browser reference interpreter (frontend/src/lib/refresh/program-interpreter.ts) over the authored `program` + `broker_script`. Do not hand-edit `expect`; regenerate with `make gen-vectors` (UPDATE_VECTORS=1). Loaded in lockstep by all three relay test suites, each feeding `broker_script` at its own mock seam. `expect.responses[*].kind` is `relayed` (status/request_url/body_b64/signature/headers asserted byte-exact) or `provider_error` (status + decoded `error` asserted; `request_url` intentionally omitted — its sentinel host is per-impl). See test-vectors/README.md.",
+  "vectors": [
+    {
+      "name": "request-then-poll",
+      "auth_headers": {
+        "Authorization": "Bearer t"
+      },
+      "signing_token": "tok",
+      "program": {
+        "purpose": "billing",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/q",
+              "method": "POST",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing",
+              "req_sig": "sig"
+            },
+            "extract": [
+              {
+                "path": "jobId",
+                "as_binding": "jobId",
+                "coerce": "string"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "poll",
+            "request": {
+              "host": "bq",
+              "path": "/jobs/{jobId}",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing"
+            },
+            "until": {
+              "any_of": [
+                {
+                  "kind": "falsey",
+                  "binding": "done"
+                }
+              ]
+            },
+            "extract": [
+              {
+                "path": "done",
+                "as_binding": "done",
+                "coerce": "bool"
+              }
+            ],
+            "require_bindings": [
+              "jobId"
+            ],
+            "deadline_ms": 90000,
+            "max_iterations": 64,
+            "stop_on_status_gte": 400
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "eyJqb2JJZCI6ImFiYyJ9",
+          "signature": "s"
+        },
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "eyJkb25lIjpmYWxzZX0=",
+          "signature": "s"
+        },
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "eyJkb25lIjp0cnVlfQ==",
+          "signature": "s"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "POST",
+            "host": "bq",
+            "path": "/q",
+            "query": "",
+            "headers": {
+              "Authorization": "Bearer t"
+            },
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": "sig"
+          },
+          {
+            "method": "GET",
+            "host": "bq",
+            "path": "/jobs/abc",
+            "query": "",
+            "headers": {
+              "Authorization": "Bearer t"
+            },
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          },
+          {
+            "method": "GET",
+            "host": "bq",
+            "path": "/jobs/abc",
+            "query": "",
+            "headers": {
+              "Authorization": "Bearer t"
+            },
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://bq/q",
+            "request_purpose": "billing",
+            "body_b64": "eyJqb2JJZCI6ImFiYyJ9",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            }
+          },
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://bq/jobs/abc",
+            "request_purpose": "billing",
+            "body_b64": "eyJkb25lIjpmYWxzZX0=",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            }
+          },
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://bq/jobs/abc",
+            "request_purpose": "billing",
+            "body_b64": "eyJkb25lIjp0cnVlfQ==",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "stop-on-status",
+      "auth_headers": {},
+      "signing_token": "tok",
+      "program": {
+        "purpose": "billing",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/q",
+              "method": "POST",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing",
+              "req_sig": "sig"
+            },
+            "extract": [
+              {
+                "path": "jobId",
+                "as_binding": "jobId",
+                "coerce": "string"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "poll",
+            "request": {
+              "host": "bq",
+              "path": "/jobs/{jobId}",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing"
+            },
+            "until": {
+              "any_of": [
+                {
+                  "kind": "falsey",
+                  "binding": "done"
+                }
+              ]
+            },
+            "extract": [
+              {
+                "path": "done",
+                "as_binding": "done",
+                "coerce": "bool"
+              }
+            ],
+            "require_bindings": [
+              "jobId"
+            ],
+            "deadline_ms": 90000,
+            "max_iterations": 64,
+            "stop_on_status_gte": 400
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 500,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "eyJlcnJvciI6ImJvb20ifQ==",
+          "signature": "s"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "POST",
+            "host": "bq",
+            "path": "/q",
+            "query": "",
+            "headers": {},
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": "sig"
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 500,
+            "request_url": "https://bq/q",
+            "request_purpose": "billing",
+            "body_b64": "eyJlcnJvciI6ImJvb20ifQ==",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "path-traversal-guard",
+      "auth_headers": {},
+      "signing_token": "tok",
+      "program": {
+        "purpose": "billing",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/q",
+              "method": "POST",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing",
+              "req_sig": "sig"
+            },
+            "extract": [
+              {
+                "path": "jobId",
+                "as_binding": "jobId",
+                "coerce": "string"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "poll",
+            "request": {
+              "host": "bq",
+              "path": "/jobs/{jobId}",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing"
+            },
+            "until": {
+              "any_of": [
+                {
+                  "kind": "falsey",
+                  "binding": "done"
+                }
+              ]
+            },
+            "extract": [
+              {
+                "path": "done",
+                "as_binding": "done",
+                "coerce": "bool"
+              }
+            ],
+            "require_bindings": [
+              "jobId"
+            ],
+            "deadline_ms": 90000,
+            "max_iterations": 64,
+            "stop_on_status_gte": 400
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "eyJqb2JJZCI6Ii4uL2V2aWwifQ==",
+          "signature": "s"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "POST",
+            "host": "bq",
+            "path": "/q",
+            "query": "",
+            "headers": {},
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": "sig"
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://bq/q",
+            "request_purpose": "billing",
+            "body_b64": "eyJqb2JJZCI6Ii4uL2V2aWwifQ==",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            }
+          },
+          {
+            "kind": "provider_error",
+            "status": 502,
+            "error": "substituted path value outside allowed charset"
+          }
+        ]
+      }
+    },
+    {
+      "name": "poll-deadline",
+      "auth_headers": {},
+      "signing_token": "tok",
+      "clock": [
+        0,
+        100000
+      ],
+      "program": {
+        "purpose": "billing",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/q",
+              "method": "POST",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing",
+              "req_sig": "sig"
+            },
+            "extract": [
+              {
+                "path": "jobId",
+                "as_binding": "jobId",
+                "coerce": "string"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "poll",
+            "request": {
+              "host": "bq",
+              "path": "/jobs/{jobId}",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing"
+            },
+            "until": {
+              "any_of": [
+                {
+                  "kind": "falsey",
+                  "binding": "done"
+                }
+              ]
+            },
+            "extract": [
+              {
+                "path": "done",
+                "as_binding": "done",
+                "coerce": "bool"
+              }
+            ],
+            "require_bindings": [
+              "jobId"
+            ],
+            "deadline_ms": 90000,
+            "max_iterations": 64,
+            "stop_on_status_gte": 400
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "eyJqb2JJZCI6ImFiYyJ9",
+          "signature": "s"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "POST",
+            "host": "bq",
+            "path": "/q",
+            "query": "",
+            "headers": {},
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": "sig"
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://bq/q",
+            "request_purpose": "billing",
+            "body_b64": "eyJqb2JJZCI6ImFiYyJ9",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            }
+          },
+          {
+            "kind": "provider_error",
+            "status": 504,
+            "error": "poll deadline exceeded"
+          }
+        ]
+      }
+    },
+    {
+      "name": "broker-transport-error",
+      "auth_headers": {},
+      "signing_token": "tok",
+      "program": {
+        "purpose": "billing",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/q",
+              "method": "POST",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing",
+              "req_sig": "sig"
+            },
+            "extract": [
+              {
+                "path": "jobId",
+                "as_binding": "jobId",
+                "coerce": "string"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "poll",
+            "request": {
+              "host": "bq",
+              "path": "/jobs/{jobId}",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing"
+            },
+            "until": {
+              "any_of": [
+                {
+                  "kind": "falsey",
+                  "binding": "done"
+                }
+              ]
+            },
+            "extract": [
+              {
+                "path": "done",
+                "as_binding": "done",
+                "coerce": "bool"
+              }
+            ],
+            "require_bindings": [
+              "jobId"
+            ],
+            "deadline_ms": 90000,
+            "max_iterations": 64,
+            "stop_on_status_gte": 400
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "fail": "broker_error",
+          "code": "upstream_unreachable",
+          "http_status": 502,
+          "message": "broker down"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "POST",
+            "host": "bq",
+            "path": "/q",
+            "query": "",
+            "headers": {},
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": "sig"
+          }
+        ],
+        "responses": [
+          {
+            "kind": "provider_error",
+            "status": 502,
+            "error": "upstream_unreachable: broker down"
+          }
+        ]
+      }
+    }
+  ]
+}
