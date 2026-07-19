@@ -61,15 +61,28 @@ def run_program(
     out: list[dict[str, Any]] = []
     for step in program.get("steps", []):
         if step.get("kind") == "request":
-            outcome = _run_request_step(step, bindings, auth_headers, signing_token, broker_client, program, out)
+            outcome = _run_request_step(
+                step, bindings, auth_headers, signing_token, broker_client, program, out
+            )
         else:
-            outcome = _run_poll_step(step, bindings, auth_headers, signing_token, broker_client, program, out, now)
+            outcome = _run_poll_step(
+                step,
+                bindings,
+                auth_headers,
+                signing_token,
+                broker_client,
+                program,
+                out,
+                now,
+            )
         if outcome == "terminate":
             return out
     return out
 
 
-def _run_request_step(step, bindings, auth_headers, signing_token, broker_client, program, out) -> str:
+def _run_request_step(
+    step, bindings, auth_headers, signing_token, broker_client, program, out
+) -> str:
     return _forward_and_extract(
         step["request"],
         step.get("extract") or [],
@@ -83,7 +96,9 @@ def _run_request_step(step, bindings, auth_headers, signing_token, broker_client
     )
 
 
-def _run_poll_step(step, bindings, auth_headers, signing_token, broker_client, program, out, now) -> str:
+def _run_poll_step(
+    step, bindings, auth_headers, signing_token, broker_client, program, out, now
+) -> str:
     loop_start = now()
     iterations = 0
     require_bindings = step.get("require_bindings") or []
@@ -97,7 +112,11 @@ def _run_poll_step(step, bindings, auth_headers, signing_token, broker_client, p
         if iterations >= max_iterations:
             return "continue"
         if now() - loop_start > deadline_ms:
-            out.append(provider_error_response(504, program.get("purpose", ""), "poll deadline exceeded"))
+            out.append(
+                provider_error_response(
+                    504, program.get("purpose", ""), "poll deadline exceeded"
+                )
+            )
             return "terminate"
         iterations += 1
         outcome = _forward_and_extract(
@@ -116,12 +135,24 @@ def _run_poll_step(step, bindings, auth_headers, signing_token, broker_client, p
 
 
 def _forward_and_extract(
-    req, extract, stop_gte, bindings, auth_headers, signing_token, broker_client, program, out
+    req,
+    extract,
+    stop_gte,
+    bindings,
+    auth_headers,
+    signing_token,
+    broker_client,
+    program,
+    out,
 ) -> str:
     built = _build_concrete_request(req, bindings)
     if built is None:
         out.append(
-            provider_error_response(502, program.get("purpose", ""), "substituted path value outside allowed charset")
+            provider_error_response(
+                502,
+                program.get("purpose", ""),
+                "substituted path value outside allowed charset",
+            )
         )
         return "terminate"
 
@@ -132,7 +163,11 @@ def _forward_and_extract(
     except BrokerForwardCapError:
         raise
     except BrokerError as err:
-        out.append(provider_error_response(502, program.get("purpose", ""), f"{err.code}: {err}"))
+        out.append(
+            provider_error_response(
+                502, program.get("purpose", ""), f"{err.code}: {err}"
+            )
+        )
         return "terminate"
 
     relayed = to_raw_response_payload(built, broker_resp)
@@ -143,7 +178,9 @@ def _forward_and_extract(
     return "continue"
 
 
-def _build_concrete_request(req: dict[str, Any], bindings: dict[str, str]) -> dict[str, Any] | None:
+def _build_concrete_request(
+    req: dict[str, Any], bindings: dict[str, str]
+) -> dict[str, Any] | None:
     path = _substitute_path_guarded(req["path"], bindings)
     if path is None:
         return None
@@ -184,11 +221,29 @@ def _substitute_path_guarded(template: str, bindings: dict[str, str]) -> str | N
     return None if bad else value
 
 
-def _apply_extract(rules: list[dict[str, Any]], body_b64: str, bindings: dict[str, str]) -> None:
+def _reject_json_constant(name: str) -> Any:
+    """Refuse the JSON constants ``JSON.parse`` refuses. ``json.loads`` calls
+    this for a bare ``Infinity``/``-Infinity``/``NaN`` literal; raising turns
+    the whole body unparseable, exactly as the browser reference sees it."""
+    raise ValueError(f"non-standard JSON constant: {name}")
+
+
+def _apply_extract(
+    rules: list[dict[str, Any]], body_b64: str, bindings: dict[str, str]
+) -> None:
     if not rules:
         return
     try:
-        parsed: Any = json.loads(base64.b64decode(body_b64).decode("utf-8"))
+        parsed: Any = json.loads(
+            base64.b64decode(body_b64).decode("utf-8"),
+            # CPython accepts bare `Infinity`/`-Infinity`/`NaN` as a
+            # non-standard extension; `JSON.parse` REJECTS them, so the
+            # browser reference treats such a body as unparseable and every
+            # binding from it becomes "". Raise to land in the same `except`
+            # and match, instead of extracting an "inf" no other relay can
+            # produce.
+            parse_constant=_reject_json_constant,
+        )
     except (ValueError, UnicodeDecodeError):
         parsed = {}
     for rule in rules:
@@ -202,16 +257,84 @@ def _apply_extract(rules: list[dict[str, Any]], body_b64: str, bindings: dict[st
 
 def _js_string(raw: Any) -> str:
     """Stringify like JS ``String()`` so the port matches the browser
-    interpreter for non-string JSON values (bool/number)."""
+    interpreter for every JSON value shape: arrays join element-strings
+    with "," (``None`` renders empty, nested arrays flatten), objects read
+    ``"[object Object]"``, numbers use ECMA-262 notation."""
     if raw is None:
         return ""
     if raw is True:
         return "true"
     if raw is False:
         return "false"
-    if isinstance(raw, float) and raw.is_integer():
-        return str(int(raw))  # JS: String(1.0) === "1"
+    if isinstance(raw, list):
+        return ",".join(_js_string(x) for x in raw)
+    if isinstance(raw, dict):
+        return "[object Object]"
+    if isinstance(raw, (int, float)):
+        return _js_number_string(raw)
     return str(raw)
+
+
+def _js_number_string(raw: int | float) -> str:
+    """ECMA-262 ``Number::toString(10)``. CPython's ``repr`` produces the
+    same shortest round-trip DIGITS as JS but different NOTATION: it
+    switches to exponent form at 1e16/1e-5 (JS: 1e21/1e-6) and zero-pads
+    single-digit exponents (``'1e-07'`` vs JS ``'1e-7'``). A JSON int is
+    first collapsed through ``float`` because the browser interpreter
+    reads every JSON number as a double."""
+    try:
+        x = float(raw)
+    except OverflowError:
+        # A JSON integer literal too large for a double: JS parses it as
+        # Infinity and String() renders that.
+        return "Infinity" if raw > 0 else "-Infinity"
+    # A float literal that overflows the double range (``1e400``) is VALID
+    # JSON, so ``parse_constant`` never sees it — CPython yields ``inf`` and
+    # ``repr`` spells it "inf" where JS ``String()`` gives "Infinity". Handle
+    # it before ``_ecma_notation``, which would pass the letters through as
+    # if they were digits.
+    if x != x:
+        return "NaN"
+    if x == float("inf"):
+        return "Infinity"
+    if x == float("-inf"):
+        return "-Infinity"
+    if x.is_integer() and abs(x) < 2**53:
+        return str(int(x))
+    return _ecma_notation(repr(x))
+
+
+def _ecma_notation(shortest: str) -> str:
+    """Reformat a shortest-round-trip float ``repr`` into ECMA-262
+    §6.1.6.1.20 notation: with ``s`` the significant digits (length ``k``)
+    and ``n`` the decimal-point position (value = 0.s x 10^n) — plain
+    digits + zeros for ``k <= n <= 21``, embedded point for
+    ``0 < n <= 21``, ``0.0...s`` down to ``n > -6``, exponent form
+    (unpadded, explicit sign) beyond."""
+    sign = ""
+    body = shortest
+    if body.startswith("-"):
+        sign, body = "-", body[1:]
+    mantissa, _, exp_str = body.partition("e")
+    exp10 = int(exp_str) if exp_str else 0
+    int_part, _, frac_part = mantissa.partition(".")
+    digits = int_part + frac_part
+    point_pos = len(int_part) + exp10
+    stripped = digits.lstrip("0")
+    point_pos -= len(digits) - len(stripped)
+    digits = stripped.rstrip("0")
+    if not digits:
+        return "0"
+    k, n = len(digits), point_pos
+    if k <= n <= 21:
+        return sign + digits + "0" * (n - k)
+    if 0 < n <= 21:
+        return sign + digits[:n] + "." + digits[n:]
+    if -6 < n <= 0:
+        return sign + "0." + "0" * (-n) + digits
+    e = n - 1
+    head = digits[0] + ("." + digits[1:] if k > 1 else "")
+    return sign + head + "e" + ("+" if e >= 0 else "-") + str(abs(e))
 
 
 def _read_dotted_path(obj: Any, path: str) -> Any:

@@ -582,6 +582,182 @@
           }
         ]
       }
+    },
+    {
+      "name": "extract-stringify-shapes",
+      "_comment": "Pins the interpreter's JS-String() coercion of every extracted value shape — arrays (join with ','), objects ('[object Object]'), an all-null array (empty string, so its query param is dropped), and ECMA-262 number notation (decimal through (1e-6, 1e21), unpadded exponents, shortest-digits zero-extension above 2^53) — plus the query percent-encoding of the substituted values, and exponent overflow (`1e400` is VALID JSON that parses to Infinity, so it never reaches a non-standard-constant guard; String() spells it 'Infinity', not the host language's 'inf').",
+      "auth_headers": {
+        "Authorization": "Bearer t"
+      },
+      "signing_token": "tok",
+      "program": {
+        "purpose": "shapes",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "api",
+              "path": "/first",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "shapes",
+              "req_sig": null
+            },
+            "extract": [
+              {
+                "path": "arr",
+                "as_binding": "arr",
+                "coerce": "string"
+              },
+              {
+                "path": "nested",
+                "as_binding": "nested",
+                "coerce": "string"
+              },
+              {
+                "path": "obj",
+                "as_binding": "obj",
+                "coerce": "string"
+              },
+              {
+                "path": "nullarr",
+                "as_binding": "nullarr",
+                "coerce": "string"
+              },
+              {
+                "path": "tiny",
+                "as_binding": "tiny",
+                "coerce": "string"
+              },
+              {
+                "path": "exp",
+                "as_binding": "exp",
+                "coerce": "string"
+              },
+              {
+                "path": "big",
+                "as_binding": "big",
+                "coerce": "string"
+              },
+              {
+                "path": "huge",
+                "as_binding": "huge",
+                "coerce": "string"
+              },
+              {
+                "path": "ovf",
+                "as_binding": "ovf",
+                "coerce": "string"
+              },
+              {
+                "path": "novf",
+                "as_binding": "novf",
+                "coerce": "string"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "request",
+            "request": {
+              "host": "api",
+              "path": "/second",
+              "method": "GET",
+              "query": {
+                "a": "{arr}",
+                "n": "{nested}",
+                "o": "{obj}",
+                "z": "{nullarr}",
+                "t": "{tiny}",
+                "e": "{exp}",
+                "b": "{big}",
+                "h": "{huge}",
+                "v": "{ovf}",
+                "w": "{novf}"
+              },
+              "headers": {},
+              "body": null,
+              "purpose": "shapes",
+              "req_sig": null
+            },
+            "extract": [],
+            "stop_on_status_gte": 400
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "eyJhcnIiOlsxLCJhIixudWxsXSwibmVzdGVkIjpbWzEsMl0sWzNdXSwib2JqIjp7IngiOjF9LCJudWxsYXJyIjpbbnVsbF0sInRpbnkiOjFlLTA2LCJleHAiOjEuNWUtMDcsImJpZyI6MTAwMDAwMDAwMDAwMDAwMDEyOCwiaHVnZSI6MWUrMjEsIm92ZiI6MWU0MDAsIm5vdmYiOi0xZTQwMH0=",
+          "signature": "s"
+        },
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "eyJvayI6dHJ1ZX0=",
+          "signature": "s"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "GET",
+            "host": "api",
+            "path": "/first",
+            "query": "",
+            "headers": {
+              "Authorization": "Bearer t"
+            },
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          },
+          {
+            "method": "GET",
+            "host": "api",
+            "path": "/second",
+            "query": "a=1%2Ca%2C&n=1%2C2%2C3&o=%5Bobject+Object%5D&t=0.000001&e=1.5e-7&b=1000000000000000100&h=1e%2B21&v=Infinity&w=-Infinity",
+            "headers": {
+              "Authorization": "Bearer t"
+            },
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://api/first",
+            "request_purpose": "shapes",
+            "body_b64": "eyJhcnIiOlsxLCJhIixudWxsXSwibmVzdGVkIjpbWzEsMl0sWzNdXSwib2JqIjp7IngiOjF9LCJudWxsYXJyIjpbbnVsbF0sInRpbnkiOjFlLTA2LCJleHAiOjEuNWUtMDcsImJpZyI6MTAwMDAwMDAwMDAwMDAwMDEyOCwiaHVnZSI6MWUrMjEsIm92ZiI6MWU0MDAsIm5vdmYiOi0xZTQwMH0=",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            }
+          },
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://api/second?a=1%2Ca%2C&n=1%2C2%2C3&o=%5Bobject+Object%5D&t=0.000001&e=1.5e-7&b=1000000000000000100&h=1e%2B21&v=Infinity&w=-Infinity",
+            "request_purpose": "shapes",
+            "body_b64": "eyJvayI6dHJ1ZX0=",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            }
+          }
+        ]
+      }
     }
   ]
 }
