@@ -41,11 +41,13 @@ from . import api
 PBES2_ALG = "PBES2-HS256+A128KW"
 ENC_ALG = "A256GCM"
 MIN_PBKDF2_ITERS = 600_000
-# Ceiling mirrors the browser reference (`parseJwe`: p2c must be a positive
-# 32-bit integer). Also a CPU guard: without it a tampered header could demand
-# an arbitrarily large PBKDF2 run before the tag check gets a chance to fail.
-MAX_PBKDF2_ITERS = 0xFFFF_FFFF
 DEFAULT_PBKDF2_ITERS = 600_000
+# CPU guard, mirroring the browser reference's `MAX_PBKDF2_ITERS`: without a
+# ceiling a tampered/corrupted header can demand an arbitrarily large PBKDF2
+# run before the auth tag gets a chance to fail. 4x the default is the
+# smallest multiple that still accepts blobs written by a future client at a
+# raised default while bounding the worst-case derivation.
+MAX_PBKDF2_ITERS = 4 * DEFAULT_PBKDF2_ITERS
 _P2S_SIZE = 16
 _IV_SIZE = 12
 _TAG_SIZE = 16

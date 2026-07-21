@@ -83,16 +83,35 @@ def test_below_iteration_floor_rejected():
         vault.decrypt_jwe(blob, PASSWORD)
 
 
-def test_above_iteration_cap_rejected(jwe_blob):
-    # A real blob with >2^32 iterations can't feasibly be minted, so tamper a
-    # valid header instead. The cap (mirroring the browser's 32-bit p2c bound)
-    # must reject during header validation — before any PBKDF2 work runs.
+def _retarget_p2c(jwe_blob, p2c):
+    """Rewrite a valid blob's header `p2c`, leaving everything else intact so
+    the iteration band is the only reason validation can fail."""
     parts = jwe_blob.split(".")
     header = json.loads(vault._b64u_decode(parts[0]))
-    header["p2c"] = vault.MAX_PBKDF2_ITERS + 1
+    header["p2c"] = p2c
     parts[0] = vault._b64u_encode(json.dumps(header).encode())
+    return ".".join(parts)
+
+
+def test_above_iteration_cap_rejected(jwe_blob):
+    # A real blob at the cap+1 is expensive to mint, so tamper a valid header
+    # instead. The cap must reject during header validation — before any
+    # PBKDF2 work runs.
+    tampered = _retarget_p2c(jwe_blob, vault.MAX_PBKDF2_ITERS + 1)
     with pytest.raises(vault.VaultError, match="iteration"):
-        vault.decrypt_jwe(".".join(parts), PASSWORD)
+        vault.decrypt_jwe(tampered, PASSWORD)
+
+
+def test_32bit_max_iterations_rejected(jwe_blob):
+    """Unbounded `p2c` would make every unlock burn billions of PBKDF2
+    iterations before the auth tag could reject the blob."""
+    tampered = _retarget_p2c(jwe_blob, 0xFFFF_FFFF)
+    with pytest.raises(vault.VaultError, match="iteration"):
+        vault.decrypt_jwe(tampered, PASSWORD)
+
+
+def test_iteration_cap_is_small_multiple_of_default():
+    assert vault.MAX_PBKDF2_ITERS == 4 * vault.DEFAULT_PBKDF2_ITERS
 
 
 def _lift_jwcrypto_iter_cap(monkeypatch):
