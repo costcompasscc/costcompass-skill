@@ -12,7 +12,30 @@ import httpx
 
 
 class ApiError(Exception):
-    """User-facing API failure (auth, connectivity, or a 4xx/5xx body)."""
+    """User-facing API failure (auth, connectivity, or a 4xx/5xx body).
+
+    ``status`` is the upstream HTTP status when there was one, else ``None``
+    (connectivity failures, malformed bodies). Callers that need to branch on
+    a specific status — the vault's revision conflict below — read it rather
+    than matching on the message text.
+    """
+
+    def __init__(self, message: str, *, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+class VaultRevisionConflict(ApiError):
+    """``PUT /vault`` lost the server's compare-and-set on the revision.
+
+    Another writer (another relay, or this one in a different process)
+    committed a vault revision after the document we hold was read. The
+    caller must re-read the server's current document and re-apply its
+    change on top of it — never re-upload the copy it already holds.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, status=409)
 
 
 class Client:
@@ -60,13 +83,16 @@ class Client:
         if none_on_404 and resp.status_code == 404:
             return None
         if resp.status_code in (401, 403):
-            raise ApiError("Invalid or expired API key.")
+            raise ApiError("Invalid or expired API key.", status=resp.status_code)
         if resp.status_code >= 400:
             # Never echo the response body: these endpoints (notably the
             # vault PUT) sit next to secret material, and an upstream error
             # body could carry sensitive content. The status + endpoint is
             # enough for the user to act on.
-            raise ApiError(f"{method} {path} failed ({resp.status_code})")
+            raise ApiError(
+                f"{method} {path} failed ({resp.status_code})",
+                status=resp.status_code,
+            )
         if 300 <= resp.status_code < 400:
             # httpx does not follow redirects; a 3xx here means the configured
             # URL is not the API base (e.g. an http→https or trailing-path
@@ -122,11 +148,21 @@ class Client:
             raise ApiError("GET /vault returned a non-JSON response") from exc
 
     def put_vault(self, jwe: str, expected_revision: int) -> dict[str, Any]:
-        return self._json(
-            "PUT",
-            "/vault",
-            json={"jwe": jwe, "expected_revision": expected_revision},
-        )
+        try:
+            return self._json(
+                "PUT",
+                "/vault",
+                json={"jwe": jwe, "expected_revision": expected_revision},
+            )
+        except ApiError as exc:
+            # 409 is the server's revision compare-and-set failing, which is
+            # recoverable by re-reading and re-applying. Give it its own type
+            # so callers can't confuse it with a 500.
+            if exc.status == 409:
+                raise VaultRevisionConflict(
+                    "vault was updated elsewhere (revision conflict)"
+                ) from exc
+            raise
 
     # --- fetch runs -----------------------------------------------------
 

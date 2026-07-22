@@ -202,8 +202,9 @@ def test_resolver_writes_back_rotated_token():
 
 
 def test_resolver_write_back_failure_raises_oauth_error():
-    # Mint rotates the token, but persisting it (PUT /vault) fails — this must
-    # surface as a per-card OAuthError, not an uncaught ApiError that aborts the run.
+    # Mint rotates the token, but persisting it (PUT /vault) can never land —
+    # this must surface as a per-card OAuthError, not an uncaught ApiError that
+    # aborts the run. With no readable vault to re-read, the retry can't run.
     def oauth_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
@@ -232,8 +233,234 @@ def test_resolver_write_back_failure_raises_oauth_error():
     resolver = oauth.OAuthResolver(
         oauth_client, api_client, _vault_with_sentinel("rt-old"), PASSWORD
     )
-    with pytest.raises(oauth.OAuthError, match="could not persist"):
+    with pytest.raises(oauth.OAuthError, match="could not save it") as exc:
         resolver.access_token("google", "__google_oauth__", "/google/mint")
+    # 409 so the orchestrator tags the body reauth_required: the old token is
+    # dead upstream, so an unsaved rotation is a dead grant, not a blip.
+    assert exc.value.status == 409
+
+
+# ---- rotation write-back: revision-conflict retry ----------------------
+#
+# Jitter is forced OFF in every test below. The retry's correctness rests
+# entirely on the server's compare-and-set, never on a delay, so the whole
+# block runs with zero backoff — a regression that leaned on timing would fail
+# here rather than pass by luck on a slow machine.
+
+NO_JITTER = {"sleep": lambda _s: None, "random": lambda: 0.0}
+
+
+def _rotating_resolver(api_handler, *, sentinel="rt-old"):
+    """A resolver whose mint always rotates rt-old -> rt-new."""
+
+    def oauth_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "access_token": "at",
+                "expires_at_utc_secs": 9999,
+                "refresh_token": "rt-new",
+            },
+        )
+
+    return oauth.OAuthResolver(
+        oauth.OAuthBrokerClient(
+            "https://x/oauth/v1",
+            "sk",
+            http=httpx.Client(transport=httpx.MockTransport(oauth_handler)),
+        ),
+        api.Client(
+            "https://x/api/v1",
+            "sk",
+            http=httpx.Client(transport=httpx.MockTransport(api_handler)),
+        ),
+        _vault_with_sentinel(sentinel),
+        PASSWORD,
+    )
+
+
+def test_rotation_write_back_retries_onto_the_fresh_document():
+    # The core regression: a rotation that loses the revision race used to be
+    # discarded while the old token was already dead upstream.
+    puts = []
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PUT":
+            puts.append(json.loads(request.content)["expected_revision"])
+            if len(puts) == 1:
+                return httpx.Response(409, json={"error": "revision conflict"})
+            return httpx.Response(200, json={"revision": 12, "updated_at": "z"})
+        # The server moved to revision 11 under us, sentinel still rt-old.
+        return httpx.Response(200, json=_vault_blob("rt-old", 11))
+
+    resolver = _rotating_resolver(api_handler)
+    resolver._persist_rotated_sentinel(
+        "google", "__google_oauth__", "rt-old", "rt-new", **NO_JITTER
+    )
+    # First PUT used our stale revision, the retry used the server's fresh one.
+    assert puts == [4, 11]
+    assert resolver._vault.entry_for("google", "__google_oauth__")["api_key"] == (
+        "rt-new"
+    )
+
+
+def test_rotation_write_back_stops_when_another_relay_already_saved_it():
+    puts = []
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PUT":
+            puts.append(1)
+            return httpx.Response(409, json={"error": "revision conflict"})
+        return httpx.Response(200, json=_vault_blob("rt-new", 11))
+
+    resolver = _rotating_resolver(api_handler)
+    resolver._persist_rotated_sentinel(
+        "google", "__google_oauth__", "rt-old", "rt-new", **NO_JITTER
+    )
+    assert len(puts) == 1  # no second write: the server already holds ours
+
+
+def test_rotation_write_back_abandons_a_different_grant():
+    # A third value can only mean the user reconnected while we were minting.
+    # Clobbering it would destroy a working grant to save a superseded one.
+    puts = []
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PUT":
+            puts.append(1)
+            return httpx.Response(409, json={"error": "revision conflict"})
+        return httpx.Response(200, json=_vault_blob("rt-reconnected", 11))
+
+    resolver = _rotating_resolver(api_handler)
+    resolver._persist_rotated_sentinel(
+        "google", "__google_oauth__", "rt-old", "rt-new", **NO_JITTER
+    )
+    assert len(puts) == 1
+
+
+def test_rotation_write_back_gives_up_as_reauth_after_the_budget():
+    puts = []
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PUT":
+            puts.append(1)
+            return httpx.Response(409, json={"error": "revision conflict"})
+        return httpx.Response(200, json=_vault_blob("rt-old", 11 + len(puts)))
+
+    resolver = _rotating_resolver(api_handler)
+    with pytest.raises(oauth.OAuthError, match="could not save it") as exc:
+        resolver._persist_rotated_sentinel(
+            "google", "__google_oauth__", "rt-old", "rt-new", **NO_JITTER
+        )
+    assert exc.value.status == 409
+    assert len(puts) == oauth.ROTATION_PERSIST_ATTEMPTS
+
+
+def test_rotation_write_back_does_not_retry_a_non_conflict_failure():
+    puts = []
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PUT":
+            puts.append(1)
+            return httpx.Response(500, json={"error": "boom"})
+        return httpx.Response(200, json=_vault_blob("rt-old", 11))
+
+    resolver = _rotating_resolver(api_handler)
+    with pytest.raises(oauth.OAuthError, match="could not save it"):
+        resolver._persist_rotated_sentinel(
+            "google", "__google_oauth__", "rt-old", "rt-new", **NO_JITTER
+        )
+    assert len(puts) == 1
+
+
+def test_rotation_write_back_failure_leaves_no_unsaved_edit_behind():
+    # A rotation we report as FAILED must not ride along on someone else's
+    # later write. The resolver mutates the in-memory document before
+    # uploading, and that document outlives this call: without a revert, the
+    # next successful write_back in the same run (another provider's rotation,
+    # at a revision that still validates) would quietly persist the token we
+    # just told the user was lost — a card saying "reconnect" over a vault
+    # that actually holds the new token.
+    bodies = []
+    accept_writes = False
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PUT":
+            bodies.append(json.loads(request.content))
+            if accept_writes:
+                return httpx.Response(200, json={"revision": 20, "updated_at": "z"})
+            # Until then every attempt conflicts, exhausting the budget.
+            return httpx.Response(409, json={"error": "revision conflict"})
+        return httpx.Response(200, json=_vault_blob("rt-old", 11))
+
+    resolver = _rotating_resolver(api_handler)
+    with pytest.raises(oauth.OAuthError):
+        resolver._persist_rotated_sentinel(
+            "google", "__google_oauth__", "rt-old", "rt-new", **NO_JITTER
+        )
+
+    # The document the resolver still holds must be back to the old token.
+    entry = resolver._vault.entry_for("google", "__google_oauth__")
+    assert entry is not None
+    assert entry["api_key"] == "rt-old"
+
+    # And an unrelated write that DOES land must not carry the rotation.
+    accept_writes = True
+    bodies.clear()
+    vault.write_back(resolver._api, resolver._vault, PASSWORD)
+    assert len(bodies) == 1
+    written, _, _ = vault.decrypt_to_doc(bodies[0]["jwe"], PASSWORD)
+    saved = [e for e in written["entries"] if e["provider"] == "google"]
+    assert [e["api_key"] for e in saved] == ["rt-old"]
+
+
+def test_rotation_write_back_restores_on_an_unmodelled_exception():
+    # The restore must not depend on us having enumerated the exception. Any
+    # failure leaves the document unaccepted, so an error type the handlers
+    # do not name must still not leave the rotated token sitting in the
+    # long-lived in-memory vault for someone else's write to carry along.
+    class Unmodelled(Exception):
+        pass
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        raise Unmodelled("transport exploded")
+
+    resolver = _rotating_resolver(api_handler)
+    with pytest.raises(Exception) as exc:
+        resolver._persist_rotated_sentinel(
+            "google", "__google_oauth__", "rt-old", "rt-new", **NO_JITTER
+        )
+    # It propagates rather than being reclassified as reauth...
+    assert not isinstance(exc.value, oauth.OAuthError)
+    # ...and the document is clean regardless.
+    entry = resolver._vault.entry_for("google", "__google_oauth__")
+    assert entry is not None
+    assert entry["api_key"] == "rt-old"
+
+
+def test_rotation_backoff_is_contention_relief_only():
+    # Every other test in this block runs with the delay forced to zero and
+    # still passes — the delay is never load-bearing. This one only pins that a
+    # real retry does wait, so two relays don't collide in lockstep.
+    slept = []
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PUT":
+            return httpx.Response(409, json={"error": "revision conflict"})
+        return httpx.Response(200, json=_vault_blob("rt-old", 11))
+
+    resolver = _rotating_resolver(api_handler)
+    with pytest.raises(oauth.OAuthError):
+        resolver._persist_rotated_sentinel(
+            "google",
+            "__google_oauth__",
+            "rt-old",
+            "rt-new",
+            sleep=slept.append,
+            random=lambda: 0.5,
+        )
+    assert len(slept) == oauth.ROTATION_PERSIST_ATTEMPTS - 1
+    assert all(s > 0 for s in slept)
 
 
 def test_mint_409_is_reauth():
