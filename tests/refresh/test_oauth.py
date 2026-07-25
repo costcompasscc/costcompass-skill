@@ -414,6 +414,115 @@ def test_access_token_discards_the_minted_token_on_an_abandoned_rotation():
     assert resolver._access_cache == {}
 
 
+@pytest.mark.parametrize(
+    "reloaded, outcome",
+    [
+        (None, oauth.RotationPersistOutcome.SENTINEL_VANISHED),
+        ("rt-reconnected", oauth.RotationPersistOutcome.SUPERSEDED),
+    ],
+)
+def test_an_aborted_rotation_decides_every_sibling_card(reloaded, outcome):
+    # Every card of a provider shares one sentinel, so they share one grant:
+    # whatever the first card learns about it is true for the second.
+    #
+    # Before the run-scoped memo the sibling resolved on its own and reached a
+    # DIFFERENT answer in both cases. Disconnected: the sentinel is gone, so
+    # the lookup raised a 401 and the card was badged reauth_required — for a
+    # provider the user had just removed. Reconnected: it minted against the
+    # replacement grant and fetched, which is how usage from a freshly
+    # connected account could land on a card that denotes the old one.
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PUT":
+            return httpx.Response(409, json={"error": "revision conflict"})
+        if reloaded is None:
+            # The document the server holds after a disconnect.
+            return httpx.Response(200, json=_vault_blob(revision=11, entries=[]))
+        return httpx.Response(200, json=_vault_blob(reloaded, 11))
+
+    resolver = _rotating_resolver(api_handler)
+    mints = _count_mints(resolver)
+
+    with pytest.raises(oauth.RotationAborted) as first:
+        resolver.access_token("google", "__google_oauth__", "/google/mint")
+    with pytest.raises(oauth.RotationAborted) as sibling:
+        resolver.access_token("google", "__google_oauth__", "/google/mint")
+
+    assert first.value.outcome is outcome
+    # Same outcome and same sentence, so the sibling's card records the same
+    # marker and the same last_error as the card that noticed.
+    assert sibling.value.outcome is outcome
+    assert str(sibling.value) == str(first.value)
+    # The sibling's own mint would have SUCCEEDED on the reconnect path. It
+    # must never be reached.
+    assert len(mints) == 1
+
+
+def test_an_aborted_rotation_does_not_decide_another_providers_cards():
+    # The memo keys on provider + sentinel. Sentinel keys are
+    # provider-namespaced by construction, so this can only break if the key
+    # ever drops the provider id.
+    cloudflare_entry = {
+        "id": "c",
+        "provider": "cloudflare",
+        "api_key": "cf-old",
+        "metadata": {"instance_key": "__cloudflare_oauth__"},
+    }
+    google_entry = {
+        "id": "g",
+        "provider": "google",
+        "api_key": "rt-reconnected",
+        "metadata": {"instance_key": "__google_oauth__"},
+    }
+
+    puts = []
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PUT":
+            puts.append(1)
+            # Only google's write-back loses the race; cloudflare's lands.
+            if len(puts) == 1:
+                return httpx.Response(409, json={"error": "revision conflict"})
+            return httpx.Response(200, json={"revision": 12, "updated_at": "z"})
+        # The reload carries BOTH sentinels — google's replaced (so its
+        # write-back abandons), cloudflare's untouched. A reload that dropped
+        # the other provider's entry would fail this test for the wrong reason:
+        # it replaces the resolver's whole document.
+        return httpx.Response(
+            200, json=_vault_blob(revision=11, entries=[google_entry, cloudflare_entry])
+        )
+
+    resolver = _rotating_resolver(api_handler)
+    # A second sentinel, for a different provider, in the same document.
+    resolver._vault.doc["entries"].append(cloudflare_entry)
+    mints = _count_mints(resolver)
+
+    with pytest.raises(oauth.RotationAborted):
+        resolver.access_token("google", "__google_oauth__", "/google/mint")
+    # cloudflare's card is resolved on its own terms — its own mint, its own
+    # write-back — rather than inheriting google's verdict.
+    assert (
+        resolver.access_token("cloudflare", "__cloudflare_oauth__", "/cf/mint") == "at"
+    )
+    assert mints == ["/google/mint", "/cf/mint"]
+
+
+def _count_mints(resolver):
+    """Record each mint the resolver actually performs.
+
+    The point of the memo is the mints that DON'T happen, so the assertions
+    need to see the calls rather than their results.
+    """
+    calls = []
+    real_mint = resolver._oauth.mint
+
+    def counting_mint(path, refresh_token):
+        calls.append(path)
+        return real_mint(path, refresh_token)
+
+    resolver._oauth.mint = counting_mint
+    return calls
+
+
 def test_rotation_write_back_gives_up_as_reauth_after_the_budget():
     puts = []
 

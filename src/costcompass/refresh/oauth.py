@@ -238,6 +238,41 @@ class OAuthResolver:
         self._vault = vault
         self._password = password
         self._access_cache: dict[str, str] = {}
+        # Sentinels whose OAuth grant changed underneath the run in flight,
+        # keyed by ``_abort_key``. Every card of a provider shares one
+        # sentinel, so once any entry detects the change the rest are decided
+        # too — they skip without reading the sentinel and without minting.
+        #
+        # Per-run lifetime comes free: this resolver is built inside ``run``
+        # and discarded when it returns.
+        #
+        # A plain memo is enough HERE because entries are processed one at a
+        # time, so no sibling can be mid-resolution when this is written. The
+        # browser runs entries ``concurrency``-wide and cannot use this shape:
+        # it shares the in-flight resolution PROMISE per grant
+        # (``OAuthResolutions`` in ``credential.ts``) so siblings that already
+        # started still get the same verdict. Same invariant — one grant, one
+        # verdict per run — reached the way each relay's concurrency model
+        # allows. Don't port the promise shape here to "match"; do revisit it
+        # if this port ever fans entries out.
+        #
+        # Stores the raised error, not a flag, so a sibling raises exactly what
+        # the entry that noticed raised and the orchestrator's existing
+        # ``RotationAborted`` mapping produces the identical marker and message.
+        self._aborted_sentinels: dict[str, RotationAborted] = {}
+
+    @staticmethod
+    def _abort_key(provider: str, sentinel_key: str) -> str:
+        """Key for ``_aborted_sentinels``.
+
+        Includes the provider id, unlike ``_access_cache`` above, which keys on
+        the sentinel alone. That gets away with it because sentinel keys are
+        provider-namespaced by construction (``__cloudflare_oauth__``); a
+        concat costs nothing and leaves no invariant to rely on — a shared
+        sentinel string would otherwise let one provider's abort skip another's
+        cards.
+        """
+        return f"{provider}\0{sentinel_key}"
 
     def access_token(self, provider: str, sentinel_key: str, mint_path: str) -> str:
         """Mint (and cache per sentinel) a short-lived access token.
@@ -249,6 +284,18 @@ class OAuthResolver:
         """
         if sentinel_key in self._access_cache:
             return self._access_cache[sentinel_key]
+
+        # An earlier entry in this run already found this sentinel's grant
+        # replaced or gone. Checked BEFORE the sentinel lookup below, not
+        # merely as an optimisation: on a mid-run disconnect the sentinel is
+        # already gone, so that lookup would raise a 401 and badge the card
+        # ``reauth_required`` — for a provider the user themselves just
+        # removed, and the opposite of the badge-free skip the entry that
+        # noticed got.
+        aborted = self._aborted_sentinels.get(self._abort_key(provider, sentinel_key))
+        if aborted is not None:
+            raise aborted
+
         sentinel = self._vault.entry_for(provider, sentinel_key)
         if not sentinel or not sentinel.get("api_key"):
             # Not connected — the user must (re)authorize. 401 → reauth.
@@ -295,11 +342,18 @@ class OAuthResolver:
                 # card denotes. Raising here — BEFORE the cache write below —
                 # is what discards it, so neither this entry nor any sibling
                 # card sharing the sentinel can fetch with it.
-                raise RotationAborted(
+                error = RotationAborted(
                     f"the '{provider}' connection was {ROTATION_ABORT_VERB[outcome]}"
                     f" while this refresh was running",
                     outcome=outcome,
                 )
+                # Record it for the rest of the run: this entry is the only one
+                # that gets to learn the grant changed. Siblings would each
+                # reach their own, DIFFERENT conclusion otherwise — an auth
+                # failure on a disconnect, a successful fetch under the
+                # replacement grant on a reconnect.
+                self._aborted_sentinels[self._abort_key(provider, sentinel_key)] = error
+                raise error
 
         self._access_cache[sentinel_key] = access_token
         return access_token

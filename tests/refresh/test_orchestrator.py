@@ -543,6 +543,154 @@ def test_aborted_rotation_submits_a_badge_free_skip():
     assert result.outcomes[0].state == "skipped"
 
 
+@pytest.mark.parametrize(
+    "reloaded, marker",
+    [
+        (None, "oauth_sentinel_vanished"),
+        ("rt-reconnected", "oauth_rotation_superseded"),
+    ],
+)
+def test_an_aborted_rotation_decides_every_sibling_card(reloaded, marker):
+    # Two google project cards share one sentinel, so they share one grant:
+    # whatever the first card learns about it is true for the second.
+    #
+    # Before the run-scoped memo the second card resolved on its own and
+    # reached a DIFFERENT answer in both cases. Disconnected: the sentinel is
+    # gone, so the lookup raised a 401 and the card was badged
+    # reauth_required — for a provider the user had just removed. Reconnected:
+    # it minted against the replacement grant and fetched, which is how usage
+    # from a freshly connected account could land on a card that denotes the
+    # old one.
+    def entry(instance_key):
+        return {
+            "provider_id": "google",
+            "instance_key": instance_key,
+            "state": "pending",
+            "signing_token": f"tok-{instance_key}",
+            "credential": {
+                "kind": "oauth_mint",
+                "sentinel_key": "__google_oauth__",
+                "mint_path": "/google/mint",
+            },
+            "plan": {
+                "requests": [
+                    {
+                        "url": "https://h/p",
+                        "method": "GET",
+                        "headers": {},
+                        "body": None,
+                        "purpose": "ts",
+                    }
+                ],
+                "auth_header": "authorization",
+                "auth_scheme": "Bearer",
+            },
+        }
+
+    run = {"run_id": "run-1", "fetches": [entry("proj-1"), entry("proj-2")]}
+    vault_gets = []
+    submitted = []
+    mints = []
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        p_, m = request.url.path, request.method
+        if m == "GET" and p_.endswith("/vault"):
+            vault_gets.append(1)
+            # First read hands out the token we mint from; the reload after the
+            # conflict shows what the user did — removed the connection, or
+            # replaced it with a grant we've never seen.
+            entries = (
+                [
+                    {
+                        "id": "g",
+                        "provider": "google",
+                        "api_key": "rt-old",
+                        "metadata": {"instance_key": "__google_oauth__"},
+                    }
+                ]
+                if len(vault_gets) == 1
+                else (
+                    []
+                    if reloaded is None
+                    else [
+                        {
+                            "id": "g",
+                            "provider": "google",
+                            "api_key": reloaded,
+                            "metadata": {"instance_key": "__google_oauth__"},
+                        }
+                    ]
+                )
+            )
+            return httpx.Response(
+                200,
+                json={
+                    "jwe": _vault_blob(entries),
+                    "revision": 1,
+                    "updated_at": "x",
+                },
+            )
+        if m == "PUT" and p_.endswith("/vault"):
+            return httpx.Response(409, json={"error": "revision conflict"})
+        if m == "POST" and p_.endswith("/fetch-runs"):
+            return httpx.Response(200, json=run)
+        if "/responses" in p_:
+            submitted.append(json.loads(request.content))
+            return httpx.Response(200, json={"state": "skipped", "events_ingested": 0})
+        if "/finalize" in p_:
+            return httpx.Response(
+                200, json={"run_id": "run-1", "status": "x", "providers": []}
+            )
+        if p_.endswith("/dashboard/summary"):
+            return httpx.Response(200, json={"mtd_usd": 0.0})
+        return httpx.Response(404)
+
+    def mint_handler(request: httpx.Request) -> httpx.Response:
+        mints.append(1)
+        return httpx.Response(
+            200,
+            json={
+                "access_token": "at",
+                "expires_at_utc_secs": 9999,
+                "refresh_token": "rt-new",
+            },
+        )
+
+    client = api.Client(
+        "https://x/api/v1",
+        "sk",
+        http=httpx.Client(transport=httpx.MockTransport(api_handler)),
+    )
+    oauth_client = oauth.OAuthBrokerClient(
+        "https://x/oauth/v1",
+        "sk",
+        http=httpx.Client(transport=httpx.MockTransport(mint_handler)),
+    )
+
+    class _NoBroker:
+        def forward(self, *a, **kw):
+            raise AssertionError("broker must not be called on an aborted rotation")
+
+    cfg = config.Config(api_key="sk", api_url="https://x/api/v1")
+    result = orchestrator.run(
+        cfg,
+        "sk",
+        None,
+        PASSWORD,
+        client=client,
+        broker=_NoBroker(),
+        oauth_client=oauth_client,
+        echo=lambda *_: None,
+    )
+
+    assert [o.state for o in result.outcomes] == ["skipped", "skipped"]
+    assert [s["responses"][0]["synthetic_reason"] for s in submitted] == [marker] * 2
+    assert all(s["responses"][0]["status"] == 204 for s in submitted)
+    # The sibling added no second mint — its own would have SUCCEEDED on the
+    # reconnect path.
+    assert len(mints) == 1
+
+
 def test_oauth_mint_failure_preserves_status():
     # An OAuth mint that fails with a taxonomy status (429) must be relayed as
     # a NON-synthetic provider-error carrying that status, not collapsed to 401.
