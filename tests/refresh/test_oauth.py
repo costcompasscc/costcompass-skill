@@ -294,9 +294,10 @@ def test_rotation_write_back_retries_onto_the_fresh_document():
         return httpx.Response(200, json=_vault_blob("rt-old", 11))
 
     resolver = _rotating_resolver(api_handler)
-    resolver._persist_rotated_sentinel(
+    outcome = resolver._persist_rotated_sentinel(
         "google", "__google_oauth__", "rt-old", "rt-new", **NO_JITTER
     )
+    assert outcome is oauth.RotationPersistOutcome.PERSISTED
     # First PUT used our stale revision, the retry used the server's fresh one.
     assert puts == [4, 11]
     assert resolver._vault.entry_for("google", "__google_oauth__")["api_key"] == (
@@ -314,9 +315,12 @@ def test_rotation_write_back_stops_when_another_relay_already_saved_it():
         return httpx.Response(200, json=_vault_blob("rt-new", 11))
 
     resolver = _rotating_resolver(api_handler)
-    resolver._persist_rotated_sentinel(
+    outcome = resolver._persist_rotated_sentinel(
         "google", "__google_oauth__", "rt-old", "rt-new", **NO_JITTER
     )
+    # PERSISTED, not an abandon: the grant the vault denotes IS the one we
+    # minted, so the caller must go on and fetch.
+    assert outcome is oauth.RotationPersistOutcome.PERSISTED
     assert len(puts) == 1  # no second write: the server already holds ours
 
 
@@ -332,10 +336,82 @@ def test_rotation_write_back_abandons_a_different_grant():
         return httpx.Response(200, json=_vault_blob("rt-reconnected", 11))
 
     resolver = _rotating_resolver(api_handler)
-    resolver._persist_rotated_sentinel(
+    outcome = resolver._persist_rotated_sentinel(
         "google", "__google_oauth__", "rt-old", "rt-new", **NO_JITTER
     )
+    assert outcome is oauth.RotationPersistOutcome.SUPERSEDED
+    assert outcome.aborted
     assert len(puts) == 1
+
+
+def test_rotation_write_back_abandons_a_vanished_sentinel():
+    # The bead's stronger case: the user disconnected the provider WHILE the
+    # refresh was running, so the server-fresh document no longer has the
+    # sentinel at all. Distinguished from SUPERSEDED because a disconnect and a
+    # reconnect mean different things to the user, and the App Server records
+    # which one happened.
+    puts = []
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PUT":
+            puts.append(1)
+            return httpx.Response(409, json={"error": "revision conflict"})
+        # Server-fresh document with the sentinel entry removed entirely.
+        return httpx.Response(200, json=_vault_blob(revision=11, entries=[]))
+
+    resolver = _rotating_resolver(api_handler)
+    outcome = resolver._persist_rotated_sentinel(
+        "google", "__google_oauth__", "rt-old", "rt-new", **NO_JITTER
+    )
+    assert outcome is oauth.RotationPersistOutcome.SENTINEL_VANISHED
+    assert outcome.aborted
+    # One attempt, then abandoned: never re-created the entry the user deleted.
+    assert puts == [1]
+
+
+def test_rotation_write_back_abandons_when_the_sentinel_is_already_gone():
+    # The other route to SENTINEL_VANISHED: the entry is missing on the very
+    # first pass, before any write is attempted.
+    puts = []
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PUT":
+            puts.append(1)
+        return httpx.Response(404)
+
+    resolver = _rotating_resolver(api_handler)
+    outcome = resolver._persist_rotated_sentinel(
+        "cloudflare", "__cloudflare_oauth__", "rt-old", "rt-new", **NO_JITTER
+    )
+    assert outcome is oauth.RotationPersistOutcome.SENTINEL_VANISHED
+    # Never even attempted a write — there was nothing to write onto.
+    assert puts == []
+
+
+def test_access_token_discards_the_minted_token_on_an_abandoned_rotation():
+    # The heart of the fix. The mint SUCCEEDED and rotated, but the write-back
+    # was abandoned because the vault now holds a different grant. The access
+    # token in hand no longer speaks for this card, so access_token must raise
+    # instead of returning it — and must not cache it, or a sibling card
+    # sharing the sentinel would fetch with it moments later.
+    puts = []
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PUT":
+            puts.append(1)
+            return httpx.Response(409, json={"error": "revision conflict"})
+        return httpx.Response(200, json=_vault_blob("rt-reconnected", 11))
+
+    resolver = _rotating_resolver(api_handler)
+    with pytest.raises(oauth.RotationAborted) as exc:
+        resolver.access_token("google", "__google_oauth__", "/google/mint")
+
+    assert exc.value.outcome is oauth.RotationPersistOutcome.SUPERSEDED
+    # NOT an OAuthError: that path carries a 409 the App Server classifies as
+    # reauth_required, and the replacement grant is healthy. Badging it would
+    # tell the user to reconnect a working connection.
+    assert not isinstance(exc.value, oauth.OAuthError)
+    assert resolver._access_cache == {}
 
 
 def test_rotation_write_back_gives_up_as_reauth_after_the_budget():
@@ -474,18 +550,26 @@ def test_mint_409_is_reauth():
     assert exc.value.status == 409  # preserved → server records reauth_required
 
 
-def _vault_blob(refresh_token="rt-old", revision=4):
-    """A GET /vault response body ({jwe, revision}) with one google sentinel."""
+def _vault_blob(refresh_token="rt-old", revision=4, *, entries=None):
+    """A GET /vault response body ({jwe, revision}) with one google sentinel.
+
+    ``entries`` overrides the entry list wholesale — pass ``[]`` to model the
+    document the server holds after the user disconnects the provider.
+    """
     doc = {
         "schema_version": 1,
-        "entries": [
-            {
-                "id": "g",
-                "provider": "google",
-                "api_key": refresh_token,
-                "metadata": {"instance_key": "__google_oauth__"},
-            }
-        ],
+        "entries": (
+            [
+                {
+                    "id": "g",
+                    "provider": "google",
+                    "api_key": refresh_token,
+                    "metadata": {"instance_key": "__google_oauth__"},
+                }
+            ]
+            if entries is None
+            else entries
+        ),
     }
     jwe = vault.encrypt_jwe(
         json.dumps(doc).encode(), PASSWORD, os.urandom(16), vault.DEFAULT_PBKDF2_ITERS

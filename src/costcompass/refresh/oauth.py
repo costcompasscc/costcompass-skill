@@ -28,6 +28,7 @@ from __future__ import annotations
 import random as _random
 import time
 from collections.abc import Callable
+from enum import StrEnum
 from typing import Any
 
 import httpx
@@ -40,6 +41,66 @@ from .. import vault as vault_mod
 # server's current blob, so a value that keeps losing the race is contended
 # enough that a fourth attempt is unlikely to change the outcome.
 ROTATION_PERSIST_ATTEMPTS = 3
+
+
+class RotationPersistOutcome(StrEnum):
+    """What ``_persist_rotated_sentinel`` did — why it can't just return None.
+
+    ``SENTINEL_VANISHED`` and ``SUPERSEDED`` are ABANDONED writes, and abandoning
+    is correct (see the branch that returns them). What was wrong was reporting
+    them as success: the caller then fetched provider data with an access token
+    minted from a grant the vault no longer denotes — ingesting usage for a card
+    the user just disconnected, or attributing another account's usage to this one.
+    """
+
+    #: The write landed, OR the server already held exactly the value we minted
+    #: (another relay saved ours).
+    PERSISTED = "persisted"
+    #: The sentinel is gone from the vault — the user disconnected mid-run.
+    SENTINEL_VANISHED = "sentinel_vanished"
+    #: The sentinel holds a grant we don't recognise — a reconnect mid-run, or a
+    #: sibling relay's rotation through a provider grace window.
+    SUPERSEDED = "superseded"
+
+    @property
+    def aborted(self) -> bool:
+        """Whether the grant we minted from is no longer the one the vault
+        denotes, so the caller must discard its access token rather than fetch.
+
+        Defined as "has a row in ``ROTATION_ABORT_VERB``" rather than "is not
+        PERSISTED", so classification and phrasing are one fact: a new abort
+        outcome cannot be classified as an abort until its verb exists, and the
+        lookup that phrases it raises ``KeyError`` rather than silently
+        mislabelling it.
+        """
+        return self in ROTATION_ABORT_VERB
+
+
+# The verb describing each abort to the user — and the DEFINITION of which
+# outcomes abort (see ``RotationPersistOutcome.aborted``). This replaced a binary
+# conditional whose else-branch would silently swallow a third abort outcome and
+# mislabel it as a supersede; the browser and macOS ports carry the same table,
+# where the type system makes the omission a compile error.
+ROTATION_ABORT_VERB: dict[RotationPersistOutcome, str] = {
+    RotationPersistOutcome.SENTINEL_VANISHED: "removed",
+    RotationPersistOutcome.SUPERSEDED: "renewed",
+}
+
+
+class RotationAborted(Exception):
+    """A mint's rotation write-back was abandoned: the vault's grant changed
+    underneath the run.
+
+    Deliberately NOT an ``OAuthError``: the orchestrator turns an ``OAuthError``
+    into a taxonomy-bearing provider error (409 there marks the card
+    ``reauth_required``), and the whole point of this outcome is that the
+    connection is HEALTHY — a replacement grant is sitting in the vault. The
+    entry skips badge-free and the next refresh picks the new grant up.
+    """
+
+    def __init__(self, message: str, *, outcome: RotationPersistOutcome) -> None:
+        super().__init__(message)
+        self.outcome = outcome
 
 
 def _conflict_backoff_secs(attempt: int, random: Callable[[], float]) -> float:
@@ -225,9 +286,20 @@ class OAuthResolver:
 
         rotated = result.get("refresh_token")
         if rotated and rotated != refresh_token:
-            self._persist_rotated_sentinel(
+            outcome = self._persist_rotated_sentinel(
                 provider, sentinel_key, refresh_token, rotated
             )
+            if outcome.aborted:
+                # The vault's grant changed underneath this run, so the access
+                # token we just minted no longer speaks for the connection the
+                # card denotes. Raising here — BEFORE the cache write below —
+                # is what discards it, so neither this entry nor any sibling
+                # card sharing the sentinel can fetch with it.
+                raise RotationAborted(
+                    f"the '{provider}' connection was {ROTATION_ABORT_VERB[outcome]}"
+                    f" while this refresh was running",
+                    outcome=outcome,
+                )
 
         self._access_cache[sentinel_key] = access_token
         return access_token
@@ -242,7 +314,7 @@ class OAuthResolver:
         attempts: int = ROTATION_PERSIST_ATTEMPTS,
         sleep: Callable[[float], None] = time.sleep,
         random: Callable[[], float] = _random.random,
-    ) -> None:
+    ) -> RotationPersistOutcome:
         """Write a rotated refresh-token back to the vault sentinel.
 
         The upstream invalidates ``old_token`` the moment it issues
@@ -256,6 +328,12 @@ class OAuthResolver:
         document and re-apply this one field on top of it. We never re-upload
         our locally-held copy: that would revert whatever the other writer
         just committed.
+
+        Returns which ``RotationPersistOutcome`` happened rather than None,
+        because two of them are abandoned writes the CALLER has to act on. It
+        deliberately does not raise for those — the abandon itself is correct,
+        and only the caller knows whether a stale grant matters (it does for a
+        fetch; it doesn't for an off-refresh probe).
         """
         for attempt in range(attempts):
             # Re-resolve the sentinel every pass: a reauth-retry or a reload
@@ -263,7 +341,10 @@ class OAuthResolver:
             # so an entry bound earlier could point into the stale document.
             entry = self._vault.entry_for(provider, sentinel_key)
             if entry is None:
-                return
+                # Gone before we could write. The mint read this sentinel
+                # moments ago, so it disappearing means the user disconnected
+                # the provider mid-run.
+                return RotationPersistOutcome.SENTINEL_VANISHED
             previous = entry.get("api_key")
             entry["api_key"] = rotated
             persisted = False
@@ -280,7 +361,7 @@ class OAuthResolver:
             try:
                 vault_mod.write_back(self._api, self._vault, self._password)
                 persisted = True
-                return
+                return RotationPersistOutcome.PERSISTED
             except api.VaultRevisionConflict as exc:
                 if attempt >= attempts - 1:
                     raise _rotation_persist_failed(provider, exc) from exc
@@ -292,7 +373,10 @@ class OAuthResolver:
                     raise _rotation_persist_failed(provider, exc) from exc
                 observed = self._sentinel_token(provider, sentinel_key)
                 if observed == rotated:
-                    return  # another relay already saved ours
+                    # Another relay already saved the exact value we minted —
+                    # the grant the vault denotes IS ours, so this is a success,
+                    # not an abandon.
+                    return RotationPersistOutcome.PERSISTED
                 if observed != old_token:
                     # The sentinel holds neither the token we minted from nor
                     # the one we minted. Whatever wrote it did so with a view
@@ -318,13 +402,26 @@ class OAuthResolver:
                     #
                     # ``None`` lands here too — the sentinel is gone from the
                     # server's document, i.e. the user disconnected the
-                    # provider. There is nothing left to save.
-                    return
+                    # provider. There is nothing left to save. It reports its
+                    # own outcome because the two cases mean different things to
+                    # the user (a disconnect vs a reconnect) and the App Server
+                    # records which one happened.
+                    return (
+                        RotationPersistOutcome.SENTINEL_VANISHED
+                        if observed is None
+                        else RotationPersistOutcome.SUPERSEDED
+                    )
             except (api.ApiError, vault_mod.VaultError) as exc:
                 raise _rotation_persist_failed(provider, exc) from exc
             finally:
                 if not persisted:
                     _restore_api_key(entry, previous)
+        # Unreachable for any sane budget: the final attempt either returns or
+        # raises. Only a caller passing attempts <= 0 falls through, and an
+        # unsaved rotation must never look like a successful one.
+        raise _rotation_persist_failed(
+            provider, ValueError(f"no write-back attempts made (attempts={attempts})")
+        )
 
     def _reload_vault(self) -> bool:
         """Adopt the server's current vault document, returning success.

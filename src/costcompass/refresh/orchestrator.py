@@ -90,16 +90,42 @@ class RefreshError(Exception):
     """A refresh run could not be completed."""
 
 
+# Wire markers for "this entry fetched nothing", mirroring the App Server's
+# ``_SYNTHETIC_SKIP_REASONS`` table (backend/app/services/fetch_service.py).
+# Every one records the benign ``skipped`` terminal state — no reauth badge —
+# and the server stores the reason for triage. A cross-implementation test pins
+# these literals against the backend table and the other two relays.
+SKIP_NO_CREDENTIALS = "no_credentials"
+SKIP_SENTINEL_VANISHED = "oauth_sentinel_vanished"
+SKIP_ROTATION_SUPERSEDED = "oauth_rotation_superseded"
+
+# Which marker each aborted rotation reports. Keyed lookup, not a conditional:
+# an unmapped abort outcome raises ``KeyError`` here instead of being silently
+# swallowed by an else-branch and mislabelled as a supersede. Mirrors
+# ``SKIP_FOR_ABORT`` in the browser's credential.ts, where it is compile-checked.
+SKIP_FOR_ABORT: dict[oauth.RotationPersistOutcome, str] = {
+    oauth.RotationPersistOutcome.SENTINEL_VANISHED: SKIP_SENTINEL_VANISHED,
+    oauth.RotationPersistOutcome.SUPERSEDED: SKIP_ROTATION_SUPERSEDED,
+}
+
+
 class CredentialSkip(Exception):
-    """No usable credential for a card the CLI should *skip*, not fail.
+    """Nothing to fetch for this card — *skip* it, don't fail it.
 
     Covers a keyless / subscription-only card (no vault entry on the flat
-    path) and a row whose credential shape the CLI can't satisfy (an OAuth
+    path), a row whose credential shape the CLI can't satisfy (an OAuth
     App-installation row, whose token needs an App-Server-issued grant rather
-    than a vault refresh-token sentinel). Mirrors the browser's
-    subscription-only ``no_credentials`` skip — recorded server-side as a
-    benign ``skipped`` rather than an auth failure.
+    than a vault refresh-token sentinel), and an OAuth grant that changed
+    underneath the run. Mirrors the browser's benign skip — recorded
+    server-side as ``skipped`` rather than an auth failure.
+
+    ``reason`` is the server-recognised wire marker saying WHICH of those it
+    was; the App Server persists a matching sentence for triage.
     """
+
+    def __init__(self, message: str, *, reason: str = SKIP_NO_CREDENTIALS) -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 @dataclass
@@ -170,7 +196,21 @@ def _resolve_credential(
                 "credential_routing() override"
             )
         if resolver is not None:
-            return resolver.access_token(provider, sentinel_key, mint_path)
+            try:
+                return resolver.access_token(provider, sentinel_key, mint_path)
+            except oauth.RotationAborted as exc:
+                # The vault's grant changed mid-run (the user disconnected or
+                # reconnected while this refresh was in flight), so the minted
+                # access token has been discarded and there is nothing to fetch
+                # with. Re-raised as a benign skip rather than left to fall
+                # through to the OAuthError handler: that path would badge the
+                # card ``reauth_required``, and the replacement grant is
+                # healthy. Telling the user to reconnect a working connection is
+                # its own bug. Mapping it HERE keeps the one skip-shaped exit
+                # in one place, and keeps oauth.py from importing this module.
+                raise CredentialSkip(
+                    str(exc), reason=SKIP_FOR_ABORT[exc.outcome]
+                ) from exc
     raise CredentialSkip(_skip_reason(kind, provider))
 
 
@@ -207,19 +247,23 @@ def _entry_first_url(plan: dict[str, Any]) -> str | None:
     return requests[0].get("url") if requests else None
 
 
-def _synthetic_no_credentials(plan: dict[str, Any], detail: str) -> dict[str, Any]:
-    """Synthetic stub mirroring the browser's subscription-only skip: one
-    response flagged ``no_credentials`` so the App Server records the entry
-    as a benign ``skipped`` (it reads ``synthetic_reason``, not the body, and
-    never runs ``plugin.process()`` on it)."""
+def _synthetic_skip(plan: dict[str, Any], reason: str, detail: str) -> dict[str, Any]:
+    """Synthetic stub mirroring the browser's benign skip: one response flagged
+    with a server-recognised ``synthetic_reason`` so the App Server records the
+    entry as ``skipped`` (it reads ``synthetic_reason``, not the body, and never
+    runs ``plugin.process()`` on it).
+
+    ``reason`` distinguishes WHY nothing was fetched — a keyless
+    subscription-only card, or an OAuth grant that changed mid-run. All of them
+    stay badge-free."""
     return {
-        "request_url": _entry_first_url(plan) or "synthetic://no_credentials",
-        "request_purpose": _entry_purpose(plan) or "no_credentials",
+        "request_url": _entry_first_url(plan) or f"synthetic://{reason}",
+        "request_purpose": _entry_purpose(plan) or reason,
         "status": 204,
         "headers": {},
         "body_b64": base64.b64encode(detail.encode()).decode("ascii"),
         "synthetic": True,
-        "synthetic_reason": "no_credentials",
+        "synthetic_reason": reason,
     }
 
 
@@ -329,7 +373,7 @@ def _process_entry(
             run_id,
             provider,
             instance,
-            [_synthetic_no_credentials(plan, str(exc))],
+            [_synthetic_skip(plan, exc.reason, str(exc))],
             fallback_state="skipped",
             local_message=str(exc),
             instance_label=label,

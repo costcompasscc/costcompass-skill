@@ -419,6 +419,130 @@ def test_keyless_card_submits_no_credentials_skip():
     assert outcomes[0].state == "skipped"
 
 
+def test_aborted_rotation_submits_a_badge_free_skip():
+    # The user reconnected the provider mid-run: the mint succeeded and
+    # rotated, but the write-back found a grant we don't recognise and was
+    # abandoned. The entry must skip — no broker call, and a synthetic the
+    # server files as the benign ``skipped`` state. Critically NOT the 409
+    # reauth path: the replacement grant is healthy, and badging it would tell
+    # the user to reconnect a connection that already works.
+    def sentinel(token):
+        return [
+            {
+                "id": "g",
+                "provider": "google",
+                "api_key": token,
+                "metadata": {"instance_key": "__google_oauth__"},
+            }
+        ]
+
+    run = {
+        "run_id": "run-1",
+        "fetches": [
+            {
+                "provider_id": "google",
+                "instance_key": "proj-1",
+                "state": "pending",
+                "signing_token": "tok-1",
+                "credential": {
+                    "kind": "oauth_mint",
+                    "sentinel_key": "__google_oauth__",
+                    "mint_path": "/google/mint",
+                },
+                "plan": {
+                    "requests": [
+                        {
+                            "url": "https://h/p",
+                            "method": "GET",
+                            "headers": {},
+                            "body": None,
+                            "purpose": "ts",
+                        }
+                    ],
+                    "auth_header": "authorization",
+                    "auth_scheme": "Bearer",
+                },
+            }
+        ],
+    }
+    vault_gets = []
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        p_, m = request.url.path, request.method
+        if m == "GET" and p_.endswith("/vault"):
+            vault_gets.append(1)
+            # First read hands out the token we mint from; the reload after the
+            # conflict shows the grant the user's reconnect just installed.
+            token = "rt-old" if len(vault_gets) == 1 else "rt-reconnected"
+            return httpx.Response(
+                200,
+                json={
+                    "jwe": _vault_blob(sentinel(token)),
+                    "revision": 1,
+                    "updated_at": "x",
+                },
+            )
+        if m == "PUT" and p_.endswith("/vault"):
+            return httpx.Response(409, json={"error": "revision conflict"})
+        if m == "POST" and p_.endswith("/fetch-runs"):
+            return httpx.Response(200, json=run)
+        if "/responses" in p_:
+            api_handler.submitted = json.loads(request.content)
+            return httpx.Response(200, json={"state": "skipped", "events_ingested": 0})
+        if "/finalize" in p_:
+            return httpx.Response(
+                200, json={"run_id": "run-1", "status": "x", "providers": []}
+            )
+        if p_.endswith("/dashboard/summary"):
+            return httpx.Response(200, json={"mtd_usd": 0.0})
+        return httpx.Response(404)
+
+    client = api.Client(
+        "https://x/api/v1",
+        "sk",
+        http=httpx.Client(transport=httpx.MockTransport(api_handler)),
+    )
+    # The mint succeeds AND rotates — the rotation is what triggers the
+    # write-back this test is about.
+    oauth_client = oauth.OAuthBrokerClient(
+        "https://x/oauth/v1",
+        "sk",
+        http=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda r: httpx.Response(
+                    200,
+                    json={
+                        "access_token": "at",
+                        "expires_at_utc_secs": 9999,
+                        "refresh_token": "rt-new",
+                    },
+                )
+            )
+        ),
+    )
+
+    class _NoBroker:
+        def forward(self, *a, **kw):
+            raise AssertionError("broker must not be called on an aborted rotation")
+
+    cfg = config.Config(api_key="sk", api_url="https://x/api/v1")
+    result = orchestrator.run(
+        cfg,
+        "sk",
+        None,
+        PASSWORD,
+        client=client,
+        broker=_NoBroker(),
+        oauth_client=oauth_client,
+        echo=lambda *_: None,
+    )
+    r = api_handler.submitted["responses"][0]
+    assert r["status"] == 204
+    assert r["synthetic"] is True
+    assert r["synthetic_reason"] == "oauth_rotation_superseded"
+    assert result.outcomes[0].state == "skipped"
+
+
 def test_oauth_mint_failure_preserves_status():
     # An OAuth mint that fails with a taxonomy status (429) must be relayed as
     # a NON-synthetic provider-error carrying that status, not collapsed to 401.
