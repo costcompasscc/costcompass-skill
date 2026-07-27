@@ -282,19 +282,25 @@ def _submit_outcome(
     ``EntryOutcome``. A submit failure can't abort the whole run — it
     degrades to ``fallback_state``. Always attach a reason: the normal
     fetch→submit path passes no ``local_message``, and a failed card with a
-    blank caption is undiagnosable in the UI."""
+    blank caption is undiagnosable in the UI.
+
+    The reason carries the failure's own detail. This client has no logger and
+    no telemetry — the per-card line printed by ``run`` is the only channel a
+    submit failure has, so discarding the status here left a card reporting a
+    problem with nothing to diagnose it by."""
     try:
         result = client.submit_responses(
             run_id,
             {"provider_id": provider, "instance_key": instance, "responses": responses},
         )
-    except api.ApiError:
+    except api.ApiError as exc:
+        detail = f"HTTP {exc.status}: {exc}" if exc.status is not None else str(exc)
         return EntryOutcome(
             provider,
             instance,
             fallback_state,
             error_message=local_message
-            or "Could not submit results — try refreshing again.",
+            or f"Could not submit results ({detail}) — try refreshing again.",
             instance_label=instance_label,
         )
     return EntryOutcome(

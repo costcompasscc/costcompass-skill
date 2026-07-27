@@ -1235,16 +1235,20 @@ def test_flat_broker_error_classified_not_502():
     assert "synthetic" not in out[0]
 
 
+def _submit_raising(exc: Exception):
+    class _FailingSubmit:
+        def submit_responses(self, run_id, payload):
+            raise exc
+
+    return _FailingSubmit()
+
+
 def test_submit_failure_degrades_with_a_reason():
     # The normal fetch→submit path passes no local_message. A submit failure
     # must still surface a non-empty error_message so the card isn't a blank,
     # undiagnosable "failed".
-    class _FailingSubmit:
-        def submit_responses(self, run_id, payload):
-            raise api.ApiError("network down")
-
     outcome = orchestrator._submit_outcome(
-        _FailingSubmit(),
+        _submit_raising(api.ApiError("network down")),
         "run-1",
         "anthropic",
         "",
@@ -1253,3 +1257,36 @@ def test_submit_failure_degrades_with_a_reason():
     )
     assert outcome.state == "failed"
     assert outcome.error_message  # non-empty reason attached
+    assert "network down" in outcome.error_message
+
+
+def test_submit_failure_reason_carries_the_status():
+    # This client has no logger and no telemetry: the printed card line is the
+    # only channel a submit failure has, so the status has to ride along in it.
+    outcome = orchestrator._submit_outcome(
+        _submit_raising(api.ApiError("gateway blew up", status=502)),
+        "run-1",
+        "anthropic",
+        "",
+        responses=[],
+        fallback_state="failed",
+    )
+    assert "502" in outcome.error_message
+    assert "gateway blew up" in outcome.error_message
+
+
+def test_submit_failure_keeps_a_local_message_over_the_generic_reason():
+    # A card that already knows why it degraded (a benign skip carries its own
+    # reason) keeps that copy — the submit-failure caption is the fallback for
+    # the paths that have nothing better to say, not a replacement.
+    outcome = orchestrator._submit_outcome(
+        _submit_raising(api.ApiError("network down", status=503)),
+        "run-1",
+        "anthropic",
+        "",
+        responses=[],
+        fallback_state="skipped",
+        local_message="this card has no key on this device",
+    )
+    assert outcome.state == "skipped"
+    assert outcome.error_message == "this card has no key on this device"
