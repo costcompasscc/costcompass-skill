@@ -471,6 +471,20 @@ def run(
 
     try:
         try:
+            # LOCKSTEP INVARIANT — a run mints from the SERVER's current vault,
+            # or it does not start. Here that falls out of the shape (this is a
+            # short-lived process, so the fetch is always this run's), which is
+            # exactly why it is written down: a refactor that hoisted `vault`
+            # out to a longer-lived object would silently take it away.
+            #
+            # It matters because an OAuth refresh_token that rotates on every
+            # mint is single-use and SHARED with the browser and the macOS app.
+            # Presenting one another relay already consumed is a replay, and a
+            # provider with reuse detection (cloudflare) answers a replay by
+            # revoking the whole token family — the correct current token dies
+            # with it. The 409 retry in `oauth.py` cannot undo that; it only
+            # covers the seconds-wide race. See invariant 9 in
+            # frontend/src/lib/refresh/CLAUDE.md.
             vault = vault_mod.fetch_and_decrypt(client, password)
         except vault_mod.VaultError as exc:
             # Surface a clean message (wrong password / no vault) instead of a

@@ -261,6 +261,143 @@ def test_keyless_card_raises_credential_skip():
         orchestrator._resolve_credential(entry, v, None)
 
 
+def test_run_mints_from_the_server_vault_fetched_at_run_start():
+    # LOCKSTEP INVARIANT (browser invariant 9): a run mints from the SERVER's
+    # current vault document, fetched before the run starts.
+    #
+    # Here that is a property of the CLI's SHAPE — one process, one decrypt,
+    # discarded on exit — rather than of an explicit step, which is exactly why
+    # it needs pinning: a refactor that cached the vault across runs (a daemon,
+    # a reused resolver) would take it away with nothing failing. The browser
+    # had precisely that bug: its worker keeps the decrypted vault between runs,
+    # so a long-open tab minted with a refresh_token another relay had consumed
+    # an hour earlier, and cloudflare's reuse detection revoked the whole token
+    # family in response.
+    order: list[str] = []
+    sentinel = [
+        {
+            "id": "cf",
+            "provider": "cloudflare",
+            "api_key": "rt-current",
+            "metadata": {"instance_key": "__cloudflare_oauth__"},
+        }
+    ]
+    run = {
+        "run_id": "run-1",
+        "fetches": [
+            {
+                "provider_id": "cloudflare",
+                "instance_key": "acct-1",
+                "state": "pending",
+                "signing_token": "tok-1",
+                "credential": {
+                    "kind": "oauth_mint",
+                    "sentinel_key": "__cloudflare_oauth__",
+                    "mint_path": "/cloudflare/mint",
+                },
+                "plan": {
+                    "requests": [
+                        {
+                            "url": "https://h/p",
+                            "method": "GET",
+                            "headers": {},
+                            "body": None,
+                            "purpose": "usage",
+                        }
+                    ],
+                    "auth_header": "authorization",
+                    "auth_scheme": "Bearer",
+                },
+            }
+        ],
+    }
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        p_, m = request.url.path, request.method
+        if m == "GET" and p_.endswith("/vault"):
+            order.append("vault")
+            return httpx.Response(
+                200,
+                json={
+                    "jwe": _vault_blob(sentinel),
+                    "revision": 1,
+                    "updated_at": "x",
+                },
+            )
+        if m == "PUT" and p_.endswith("/vault"):
+            return httpx.Response(200, json={"revision": 2})
+        if m == "POST" and p_.endswith("/fetch-runs"):
+            order.append("fetch-runs")
+            return httpx.Response(200, json=run)
+        if "/responses" in p_:
+            return httpx.Response(200, json={"state": "success", "events_ingested": 1})
+        if "/finalize" in p_:
+            return httpx.Response(
+                200, json={"run_id": "run-1", "status": "success", "providers": []}
+            )
+        if p_.endswith("/dashboard/summary"):
+            return httpx.Response(200, json={"mtd_usd": 0.0})
+        return httpx.Response(404)
+
+    minted_with: list[str] = []
+
+    def oauth_handler(request: httpx.Request) -> httpx.Response:
+        order.append("mint")
+        minted_with.append(json.loads(request.content)["refresh_token"])
+        return httpx.Response(
+            200,
+            json={
+                "access_token": "at",
+                "expires_at_utc_secs": 9999,
+                "refresh_token": "rt-next",
+            },
+        )
+
+    client = api.Client(
+        "https://x/api/v1",
+        "sk",
+        http=httpx.Client(transport=httpx.MockTransport(api_handler)),
+    )
+    oauth_client = oauth.OAuthBrokerClient(
+        "https://x/oauth/v1",
+        "sk",
+        http=httpx.Client(transport=httpx.MockTransport(oauth_handler)),
+    )
+    brk = broker.BrokerClient(
+        "https://x/broker/v1",
+        "sk",
+        http=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda r: httpx.Response(
+                    200,
+                    json={
+                        "status": 200,
+                        "headers": {},
+                        "body": "Yg==",
+                        "signature": "sig",
+                    },
+                )
+            )
+        ),
+    )
+    cfg = config.Config(api_key="sk", api_url="https://x/api/v1")
+    orchestrator.run(
+        cfg,
+        "sk",
+        None,
+        PASSWORD,
+        client=client,
+        broker=brk,
+        oauth_client=oauth_client,
+        echo=lambda *_: None,
+    )
+
+    # The vault read precedes the run, and the mint carries what it held.
+    assert order[0] == "vault"
+    assert order.index("vault") < order.index("fetch-runs") < order.index("mint")
+    assert minted_with == ["rt-current"]
+
+
 def test_oauth_mint_routing_passes_server_sentinel_and_path():
     # The resolver is invoked with the SERVER-supplied sentinel_key + mint_path
     # from the entry's credential routing — the CLI hardcodes no provider table.
