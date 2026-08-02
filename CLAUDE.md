@@ -56,6 +56,27 @@ scripts/gen-build-files.sh          # regenerate
 scripts/gen-build-files.sh --check  # fails if stale; runs in ./run-tests.sh
 ```
 
+## Releasing
+
+This repo is its own marketplace, so **pushing to `main` publishes**. What
+decides whether an *already-installed* plugin updates is
+`.claude-plugin/plugin.json`'s version — it names the install cache directory.
+Merge code without moving that number and existing users keep running what they
+already have, silently.
+
+```bash
+scripts/release.sh 1.1.0   # bump, relock, regenerate, test, then confirm before publishing
+```
+
+That is the only supported way to change the version — **never hand-edit
+`pyproject.toml`'s `version`**. The script authors it there, reruns `uv lock`
+and `gen-build-files.sh` so the derived files follow, runs the full suite, and
+only then commits, tags `v<version>`, and pushes. It refuses a dirty tree, a
+non-`main` branch, or a version that is unchanged or already tagged.
+
+Which number: any change to shipped behavior is a minor bump; a release that is
+only fixes is a patch bump.
+
 ## Conventions
 
 - **Mirror the browser, don't reinvent.** The wire shapes (`FetchPlan`,

@@ -239,6 +239,16 @@ scripts/gen-build-files.sh          # regenerate
 scripts/gen-build-files.sh --check  # fail if stale (runs in ./run-tests.sh)
 ```
 
+Releasing is one command. This repo is its own marketplace, so pushing to
+`main` publishes — but an already-installed plugin only updates when
+`.claude-plugin/plugin.json`'s version moves, so never hand-edit the version in
+`pyproject.toml`; go through the script, which bumps, relocks, regenerates,
+tests, tags `v<version>`, and pushes:
+
+```bash
+scripts/release.sh 1.1.0
+```
+
 The refresh path here is one of three lockstep relay implementations (the
 browser is the reference; the macOS menu-bar app is the third). The other two
 live in the CostCompass monorepo, assumed checked out as `../costcompass`. See
