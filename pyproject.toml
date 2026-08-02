@@ -1,6 +1,6 @@
 [project]
 name = "costcompass-cli"
-version = "1.0.0"
+version = "1.1.0"
 description = "CostCompass command-line client — month-to-date spend and refresh."
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
