@@ -21,7 +21,7 @@ import base64
 import sys
 import threading
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, TypeVar
 
 from .. import api, config, services
 from .. import vault as vault_mod
@@ -40,6 +40,9 @@ from .broker import (
 
 Echo = Callable[[str], None]
 ProgressWrite = Callable[[str], None]
+
+T = TypeVar("T")
+R = TypeVar("R")
 
 
 def _stdout_write(text: str) -> None:
@@ -88,6 +91,76 @@ class _ProgressTicker:
 
 class RefreshError(Exception):
     """A refresh run could not be completed."""
+
+
+# Entries processed at once within one run, matching the browser reference's
+# DEFAULT_CONCURRENCY. All three relays hold the same width on purpose — the
+# broker's per-user gate and the proxy's per-IP budget were sized against one
+# client fan-out figure, and scripts/lib/conn_limits.py in the monorepo asserts
+# the three constants are equal so a per-port tune cannot drift past it.
+# Intra-plan request fan-out stays at 1 (``_run_flat`` below is sequential),
+# so a run's in-flight ceiling is this number.
+DEFAULT_CONCURRENCY = 5
+
+
+def _run_with_concurrency(
+    items: list[T],
+    limit: int,
+    worker: Callable[[T], R],
+) -> list[R]:
+    """Run ``worker`` over ``items`` with an in-flight cap, preserving order.
+
+    Long-lived threads pulling from a shared index — not chunked batches, so a
+    slow item never stalls the others, and not ``ThreadPoolExecutor.map``,
+    which queues every task up front and would leave a future run-budget hook
+    nothing to stop feeding.
+
+    Results are written by index into a pre-sized list, so the output order is
+    the input order regardless of completion order.
+
+    ``worker`` must not raise: callers model every failure class as a returned
+    outcome. An unmodelled exception is still not swallowed — a bare
+    ``threading.Thread`` would drop it on the floor, so the first one is
+    captured and re-raised here, and the remaining items are abandoned rather
+    than dispatched.
+
+    DEVIATION from the browser, deliberately: there a worker rejection rejects
+    ``Promise.all`` while sibling runners keep draining ``items`` unawaited.
+    Here every thread is joined first, so the exception surfaces with no
+    orphaned in-flight work behind it.
+    """
+    results: list[Any] = [None] * len(items)
+    next_index = 0
+    # A list, not a plain `nonlocal` binding: the assignment happens in a
+    # worker thread, and reading the name back here is what a type checker
+    # narrows to "always None" — a mutation it cannot see.
+    failures: list[BaseException] = []
+    index_lock = threading.Lock()
+
+    def runner() -> None:
+        nonlocal next_index
+        while True:
+            with index_lock:
+                if failures or next_index >= len(items):
+                    return
+                idx = next_index
+                next_index += 1
+            try:
+                results[idx] = worker(items[idx])
+            except BaseException as exc:  # noqa: BLE001 — re-raised below
+                with index_lock:
+                    failures.append(exc)
+                return
+
+    cap = max(1, min(limit, len(items) or 1))
+    threads = [threading.Thread(target=runner) for _ in range(cap)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    if failures:
+        raise failures[0]
+    return results
 
 
 # Wire markers for "this entry fetched nothing", mirroring the App Server's
@@ -458,6 +531,7 @@ def run(
     echo: Echo = print,
     progress: bool = False,
     progress_write: ProgressWrite = _stdout_write,
+    concurrency: int = DEFAULT_CONCURRENCY,
 ) -> RefreshResult:
     owns_client = client is None
     if client is None:
@@ -502,14 +576,17 @@ def run(
         # Tick a dot per second across the network-heavy span (plan → forward
         # → submit → finalize); the ticker stops and emits a newline before the
         # result lines, so dots and results never interleave.
-        outcomes: list[EntryOutcome] = []
+        outcomes: list[EntryOutcome]
         with _ProgressTicker(progress, progress_write):
             run_data = client.create_fetch_run(providers)
             run_id = run_data["run_id"]
-            for entry in run_data.get("fetches", []):
-                outcomes.append(
-                    _process_entry(entry, vault, broker, client, run_id, resolver)
-                )
+            outcomes = _run_with_concurrency(
+                list(run_data.get("fetches", [])),
+                concurrency,
+                lambda entry: _process_entry(
+                    entry, vault, broker, client, run_id, resolver
+                ),
+            )
             client.finalize_run(run_id)
 
         for o in outcomes:

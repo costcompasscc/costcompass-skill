@@ -26,6 +26,7 @@ so adding an OAuth provider never touches this file.
 from __future__ import annotations
 
 import random as _random
+import threading
 import time
 from collections.abc import Callable
 from enum import StrEnum
@@ -246,20 +247,52 @@ class OAuthResolver:
         # Per-run lifetime comes free: this resolver is built inside ``run``
         # and discarded when it returns.
         #
-        # A plain memo is enough HERE because entries are processed one at a
-        # time, so no sibling can be mid-resolution when this is written. The
-        # browser runs entries ``concurrency``-wide and cannot use this shape:
-        # it shares the in-flight resolution PROMISE per grant
-        # (``OAuthResolutions`` in ``credential.ts``) so siblings that already
-        # started still get the same verdict. Same invariant — one grant, one
-        # verdict per run — reached the way each relay's concurrency model
-        # allows. Don't port the promise shape here to "match"; do revisit it
-        # if this port ever fans entries out.
+        # All three relays fan entries out, so a sibling CAN be mid-resolution
+        # when this is written and a plain memo is not enough on its own. Each
+        # relay reaches the same invariant — one grant, one verdict per run —
+        # the way its concurrency model allows: the browser shares the in-flight
+        # resolution PROMISE per grant (``OAuthResolutions`` in
+        # ``credential.ts``), macOS memoizes the in-flight ``Task``, and this
+        # port holds ``_sentinel_lock`` across the whole of ``access_token`` so
+        # a sibling blocks until the first resolution settles and then reads
+        # this memo. Don't port the promise shape here to "match".
         #
         # Stores the raised error, not a flag, so a sibling raises exactly what
         # the entry that noticed raised and the orchestrator's existing
         # ``RotationAborted`` mapping produces the identical marker and message.
         self._aborted_sentinels: dict[str, RotationAborted] = {}
+        # One lock per grant, so ``access_token`` resolves each sentinel exactly
+        # once per run even under fan-out. Without it two cards sharing a
+        # sentinel both miss ``_access_cache``, both mint, and race the rotation
+        # write-back — which on a rotating-token provider (cloudflare, github
+        # user) means each invalidates the other's token.
+        #
+        # Guarded by ``_sentinel_locks_guard`` because the dict itself is grown
+        # concurrently; the per-key locks it hands out are held far longer (a
+        # whole mint round-trip) than this one ever is.
+        self._sentinel_locks: dict[str, threading.Lock] = {}
+        self._sentinel_locks_guard = threading.Lock()
+        # Serializes every read, rebind and write-back of ``self._vault``. The
+        # document is shared by all sentinels, and ``_persist_rotated_sentinel``
+        # applies a SPECULATIVE ``entry["api_key"]`` to it that it restores in a
+        # ``finally``; a concurrent rotation's ``write_back`` would otherwise
+        # serialize that uncommitted edit and persist a rotation we reported as
+        # failed. Re-entrant because the persist loop calls ``_reload_vault`` /
+        # ``_sentinel_token``, which take it too.
+        #
+        # LOCK ORDER is always sentinel lock → vault lock, never the reverse.
+        # Nothing takes a sentinel lock while holding this one.
+        self._vault_lock = threading.RLock()
+
+    def _sentinel_lock(self, provider: str, sentinel_key: str) -> threading.Lock:
+        """The resolution lock for one grant, created on first use."""
+        key = self._abort_key(provider, sentinel_key)
+        with self._sentinel_locks_guard:
+            lock = self._sentinel_locks.get(key)
+            if lock is None:
+                lock = threading.Lock()
+                self._sentinel_locks[key] = lock
+            return lock
 
     @staticmethod
     def _abort_key(provider: str, sentinel_key: str) -> str:
@@ -281,7 +314,20 @@ class OAuthResolver:
         credential routing) — this method holds no provider knowledge. The
         cache keys on ``sentinel_key`` so the N cards sharing one sentinel
         (e.g. every google project) trigger a single mint + rotation.
+
+        Held under the grant's lock end to end, so under entry fan-out a
+        sibling card on the same sentinel waits for the first resolution to
+        settle and then reads its verdict — one mint, one rotation, one abort
+        — rather than racing its own.
         """
+        with self._sentinel_lock(provider, sentinel_key):
+            return self._resolve_access_token(provider, sentinel_key, mint_path)
+
+    def _resolve_access_token(
+        self, provider: str, sentinel_key: str, mint_path: str
+    ) -> str:
+        """``access_token`` minus the locking. Callers must hold the grant's
+        lock; every cache read and write below assumes that exclusion."""
         if sentinel_key in self._access_cache:
             return self._access_cache[sentinel_key]
 
@@ -296,7 +342,8 @@ class OAuthResolver:
         if aborted is not None:
             raise aborted
 
-        sentinel = self._vault.entry_for(provider, sentinel_key)
+        with self._vault_lock:
+            sentinel = self._vault.entry_for(provider, sentinel_key)
         if not sentinel or not sentinel.get("api_key"):
             # Not connected — the user must (re)authorize. 401 → reauth.
             raise OAuthError(
@@ -388,7 +435,36 @@ class OAuthResolver:
         deliberately does not raise for those — the abandon itself is correct,
         and only the caller knows whether a stale grant matters (it does for a
         fetch; it doesn't for an off-refresh probe).
+
+        Serialized across the whole run by ``_vault_lock``: the speculative
+        ``entry["api_key"]`` below is uncommitted until the server accepts it,
+        so a concurrent rotation of a DIFFERENT provider — reachable now that
+        entries fan out — must not reach ``write_back`` while it is applied.
         """
+        with self._vault_lock:
+            return self._persist_rotated_sentinel_locked(
+                provider,
+                sentinel_key,
+                old_token,
+                rotated,
+                attempts=attempts,
+                sleep=sleep,
+                random=random,
+            )
+
+    def _persist_rotated_sentinel_locked(
+        self,
+        provider: str,
+        sentinel_key: str,
+        old_token: str,
+        rotated: str,
+        *,
+        attempts: int,
+        sleep: Callable[[float], None],
+        random: Callable[[], float],
+    ) -> RotationPersistOutcome:
+        """``_persist_rotated_sentinel`` minus the locking; callers hold
+        ``_vault_lock``."""
         for attempt in range(attempts):
             # Re-resolve the sentinel every pass: a reauth-retry or a reload
             # below may have swapped ``self._vault`` for a server-fresh doc,
@@ -484,15 +560,17 @@ class OAuthResolver:
         subsequent write-back target the revision the server actually holds
         instead of conflicting on a stale one.
         """
-        try:
-            self._vault = vault_mod.fetch_and_decrypt(self._api, self._password)
-        except (api.ApiError, vault_mod.VaultError):
-            return False
-        return True
+        with self._vault_lock:
+            try:
+                self._vault = vault_mod.fetch_and_decrypt(self._api, self._password)
+            except (api.ApiError, vault_mod.VaultError):
+                return False
+            return True
 
     def _sentinel_token(self, provider: str, sentinel_key: str) -> str | None:
         """The sentinel's current refresh-token, or ``None`` when absent."""
-        entry = self._vault.entry_for(provider, sentinel_key)
+        with self._vault_lock:
+            entry = self._vault.entry_for(provider, sentinel_key)
         if not entry or not entry.get("api_key"):
             return None
         return entry["api_key"]

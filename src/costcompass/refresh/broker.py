@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import base64
 import json
+import threading
 import time
 from typing import Any, Callable
 from urllib.parse import urlsplit
@@ -250,6 +251,12 @@ class BrokerClient:
         }
         self._forward_cap = forward_cap
         self._entry_count: dict[str, int] = {}
+        # One client is shared by every entry in a run, and entries fan out, so
+        # the read-modify-write in ``_check_cap`` needs to be atomic. Keys are
+        # per-entry signing tokens, so contention is nil — but "nil contention"
+        # is not "atomic", and a lost increment is a cap that admits more
+        # forwards than it advertises.
+        self._entry_count_lock = threading.Lock()
         self._retry_attempts = max(1, retry_attempts)
         self._retry_base_s = retry_base_s
         self._retry_factor = retry_factor
@@ -309,10 +316,11 @@ class BrokerClient:
         token = request.get("signing_token")
         if not token or request.get("is_retry"):
             return
-        issued = self._entry_count.get(token, 0)
-        if issued >= self._forward_cap:
-            raise BrokerForwardCapError(self._forward_cap, issued)
-        self._entry_count[token] = issued + 1
+        with self._entry_count_lock:
+            issued = self._entry_count.get(token, 0)
+            if issued >= self._forward_cap:
+                raise BrokerForwardCapError(self._forward_cap, issued)
+            self._entry_count[token] = issued + 1
 
     def _build_body(self, request: dict[str, Any]) -> dict[str, Any]:
         body: dict[str, Any] = {
