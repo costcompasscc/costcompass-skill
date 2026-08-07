@@ -200,9 +200,10 @@ def test_run_with_concurrency_preserves_order_when_workers_finish_backwards():
             started.wait(timeout=5)
         return f"r{item}"
 
-    assert orchestrator._run_with_concurrency(items, 4, worker) == [
-        f"r{i}" for i in items
-    ]
+    assert orchestrator._run_with_concurrency(items, 4, worker) == (
+        [f"r{i}" for i in items],
+        False,
+    )
 
 
 def test_run_with_concurrency_surfaces_an_unmodelled_exception():
@@ -219,7 +220,35 @@ def test_run_with_concurrency_surfaces_an_unmodelled_exception():
 
 
 def test_run_with_concurrency_handles_an_empty_work_list():
-    assert orchestrator._run_with_concurrency([], 5, lambda item: item) == []
+    assert orchestrator._run_with_concurrency([], 5, lambda item: item) == ([], False)
+
+
+def test_run_with_concurrency_stops_feeding_when_should_stop_trips():
+    """The stop hook is consulted before a claim, so items already claimed
+    finish and unclaimed ones never start."""
+    stop = False
+
+    def worker(item: int) -> int:
+        nonlocal stop
+        if item == 2:
+            stop = True
+        return item
+
+    results, stopped = orchestrator._run_with_concurrency(
+        list(range(8)), 1, worker, lambda: stop
+    )
+    # Items 0..2 were claimed and all completed; the rest were never claimed.
+    # The prefix is dense — no None holes for the caller to filter.
+    assert results == [0, 1, 2]
+    assert stopped is True
+
+
+def test_run_with_concurrency_reports_not_stopped_when_hook_never_trips():
+    results, stopped = orchestrator._run_with_concurrency(
+        list(range(5)), 2, lambda item: item, lambda: False
+    )
+    assert results == [0, 1, 2, 3, 4]
+    assert stopped is False
 
 
 # --------------------------------------------------------------------------

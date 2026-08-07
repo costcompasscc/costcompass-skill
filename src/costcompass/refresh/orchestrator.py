@@ -20,6 +20,7 @@ from __future__ import annotations
 import base64
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, TypeVar
 
@@ -93,6 +94,31 @@ class RefreshError(Exception):
     """A refresh run could not be completed."""
 
 
+class RefreshDeadlineExceeded(RefreshError):
+    """A run exhausted ``RUN_BUDGET_S`` and gave up.
+
+    Subclasses ``RefreshError`` so ``main.py``'s existing handler catches it
+    with no change there.
+    """
+
+
+# Wall-clock budget for one whole run, checked only at seams where nothing is
+# in flight. Bounding a single request does not bound a run: an entry may hold
+# up to the broker's per-entry forward cap in requests, each retried up to
+# ``DEFAULT_RETRY_ATTEMPTS`` times honouring a Retry-After the broker caps at
+# ten minutes, so every per-request timeout can be respected while the run
+# lasts hours. All three relays hold the same figure.
+#
+# WALL clock (``time.time``), not monotonic, and deliberately so: this budget
+# has to agree with the server's wall-clock lease on an abandoned run. A
+# monotonic clock stops while the machine sleeps, so a laptop closed for two
+# hours would wake still believing it was inside its budget and submit into a
+# run the server had long since reaped. Retry backoff and the interpreter's
+# poll deadlines keep their own monotonic clocks — those measure pure
+# durations, a different job.
+RUN_BUDGET_S = 15 * 60
+
+
 # Entries processed at once within one run, matching the browser reference's
 # DEFAULT_CONCURRENCY. All three relays hold the same width on purpose — the
 # broker's per-user gate and the proxy's per-IP budget were sized against one
@@ -107,16 +133,29 @@ def _run_with_concurrency(
     items: list[T],
     limit: int,
     worker: Callable[[T], R],
-) -> list[R]:
+    should_stop: Callable[[], bool] | None = None,
+) -> tuple[list[R], bool]:
     """Run ``worker`` over ``items`` with an in-flight cap, preserving order.
 
     Long-lived threads pulling from a shared index — not chunked batches, so a
     slow item never stalls the others, and not ``ThreadPoolExecutor.map``,
-    which queues every task up front and would leave a future run-budget hook
+    which queues every task up front and would leave the run-budget hook below
     nothing to stop feeding.
 
     Results are written by index into a pre-sized list, so the output order is
     the input order regardless of completion order.
+
+    ``should_stop`` is consulted WHILE HOLDING the index lock, before a thread
+    claims its next item, and never mid-item. Checking inside the lock is what
+    makes the returned ``stopped`` agree with what was actually claimed —
+    checked outside it, two threads can both observe "not yet expired" and
+    claim past the deadline. Items already claimed always run to completion:
+    a check only at a seam where nothing is pending is what lets a run end
+    without manufacturing a half-submitted entry.
+
+    Returns ``(results, stopped)``. Claimed indices are a monotonic prefix, so
+    the filled region is exactly ``results[:claimed]`` and the caller never
+    sees a ``None`` hole; ``stopped`` says whether any item was left unclaimed.
 
     ``worker`` must not raise: callers model every failure class as a returned
     outcome. An unmodelled exception is still not swallowed — a bare
@@ -143,6 +182,8 @@ def _run_with_concurrency(
             with index_lock:
                 if failures or next_index >= len(items):
                     return
+                if should_stop is not None and should_stop():
+                    return
                 idx = next_index
                 next_index += 1
             try:
@@ -160,7 +201,8 @@ def _run_with_concurrency(
         thread.join()
     if failures:
         raise failures[0]
-    return results
+    # ``next_index`` is the claim count once every thread has joined.
+    return results[:next_index], next_index < len(items)
 
 
 # Wire markers for "this entry fetched nothing", mirroring the App Server's
@@ -391,9 +433,34 @@ def _run_flat(
     auth_headers: dict[str, str],
     signing_token: str | None,
     broker: BrokerClient,
+    past_deadline: Callable[[], bool] | None = None,
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for req in plan.get("requests", []):
+        # The run budget's second seam. An entry may hold many requests, so
+        # checking only between entries would honour the budget on paper while
+        # one entry stayed wedged for hours. Checked before the request is
+        # issued, never mid-flight.
+        if past_deadline is not None and past_deadline():
+            # Append an unsigned, NON-synthetic provider error so the entry is
+            # classified failed by the App Server's status taxonomy. Without it
+            # the short response set reads as a clean success and silently
+            # under-counts spend — the one outcome worse than a failed card.
+            #
+            # Cost, accepted deliberately: the plugin contract requires
+            # process() to raise on a 5xx, and that raise discards THIS entry's
+            # already-fetched siblings in the same submit. A partial usage
+            # window ingested as if complete would under-count; the next
+            # refresh re-pulls the whole window anyway. Other entries submitted
+            # separately and are unaffected.
+            #
+            # Mirrors the forward-cap early return below exactly.
+            out.append(
+                provider_error_response(
+                    504, req.get("purpose", ""), "run deadline exceeded"
+                )
+            )
+            return out
         try:
             resp = broker.forward_with_retry(
                 build_forward_request(req, auth_headers, signing_token)
@@ -425,6 +492,7 @@ def _process_entry(
     client: api.Client,
     run_id: str,
     resolver: oauth.OAuthResolver | None,
+    past_deadline: Callable[[], bool] | None = None,
 ) -> EntryOutcome:
     provider = entry["provider_id"]
     instance = entry.get("instance_key", "")
@@ -506,7 +574,7 @@ def _process_entry(
                 )
             ]
     else:
-        responses = _run_flat(plan, auth_headers, signing_token, broker)
+        responses = _run_flat(plan, auth_headers, signing_token, broker, past_deadline)
 
     return _submit_outcome(
         client,
@@ -532,6 +600,8 @@ def run(
     progress: bool = False,
     progress_write: ProgressWrite = _stdout_write,
     concurrency: int = DEFAULT_CONCURRENCY,
+    now: Callable[[], float] = time.time,
+    run_budget_s: float = RUN_BUDGET_S,
 ) -> RefreshResult:
     owns_client = client is None
     if client is None:
@@ -542,6 +612,15 @@ def run(
         oauth_client = oauth.OAuthBrokerClient(
             oauth.oauth_url_from_api(cfg.api_url), api_key
         )
+
+    # Computed BEFORE the vault fetch and create-run, so everything a run does
+    # counts against its budget — a run that spent ten minutes decrypting has
+    # already used most of its time. See RUN_BUDGET_S for why this is wall
+    # clock rather than monotonic.
+    deadline = now() + run_budget_s
+
+    def past_deadline() -> bool:
+        return now() >= deadline
 
     try:
         try:
@@ -580,13 +659,34 @@ def run(
         with _ProgressTicker(progress, progress_write):
             run_data = client.create_fetch_run(providers)
             run_id = run_data["run_id"]
-            outcomes = _run_with_concurrency(
+            outcomes, stopped = _run_with_concurrency(
                 list(run_data.get("fetches", [])),
                 concurrency,
                 lambda entry: _process_entry(
-                    entry, vault, broker, client, run_id, resolver
+                    entry, vault, broker, client, run_id, resolver, past_deadline
                 ),
+                past_deadline,
             )
+            if stopped:
+                # Entries left unclaimed: the budget ran out. Reached only after
+                # every thread has joined, so no card is still submitting and
+                # the run is not finalized out from under one.
+                #
+                # Finalize as cancelled so the row leaves `running` — an
+                # unfinalized run stays running until the server's lease reaps
+                # it, and a run stuck running is precisely what makes the next
+                # refresh appear to do nothing.
+                try:
+                    client.finalize_run(run_id, cancelled=True)
+                except api.ApiError:
+                    # Swallow: the deadline is the story the caller needs, and
+                    # the server's lease reaps the row either way. Raising the
+                    # finalize error instead would report the wrong cause.
+                    pass
+                raise RefreshDeadlineExceeded(
+                    "Refresh took too long and was stopped. Some providers may "
+                    "not have been updated — try again."
+                )
             client.finalize_run(run_id)
 
         for o in outcomes:
