@@ -35,7 +35,17 @@ trap 'rm -rf "$STAGE"' EXIT
 # Redirect rather than `-o`: uv records its own argv in the file header, so an
 # output path would embed this run's temp directory and the --check diff would
 # report drift on every invocation.
-( cd "$ROOT" && uv export \
+#
+# NO_COLOR for the same reason, one step further: uv colorizes the `# via ...`
+# provenance comments when it believes the caller wants color, and the redirect
+# is not enough to stop it — FORCE_COLOR overrides the not-a-TTY check, and some
+# agent and CI runners set it globally. The escapes then land in the generated
+# file, so --check compares a clean committed file against a colorized fresh one
+# and reports drift that regenerating cannot fix; it only writes the escapes
+# into the repo. It has to be the environment variable rather than the
+# equivalent `--color never` flag, because that flag would join the recorded
+# argv above and change the header on every line of this file.
+( cd "$ROOT" && NO_COLOR=1 FORCE_COLOR= uv export \
     --format requirements-txt \
     --no-dev \
     --no-emit-project \
