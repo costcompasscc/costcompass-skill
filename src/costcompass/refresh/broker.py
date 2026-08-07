@@ -85,26 +85,28 @@ _STATUS_TO_CODE = {
     504: "broker_timeout",
 }
 
-# Inverse: map a broker error code to the HTTP status the App Server's
-# taxonomy should classify (rate-limit → 429, timeout → 504, …) instead
-# of collapsing every broker failure to a generic 502.
-_CODE_TO_STATUS = {
-    "rate_limited": 429,
-    "upstream_timeout": 504,
-    "upstream_unreachable": 502,
-    "worker_pool_exhausted": 503,
-    "host_not_allowed": 502,
-    "payload_too_large": 413,
-    "unauthenticated": 401,
-    "forbidden": 403,
-    "broker_unreachable": 502,
-    "service_unavailable": 503,
-    "broker_timeout": 504,
-}
 
+def relay_status(err: BrokerError) -> int:
+    """The status to relay to the App Server for a failed forward, so its
+    taxonomy classifies a rate-limit/timeout/bad-request correctly instead of
+    collapsing every broker failure to a generic 502.
 
-def status_for_code(code: str) -> int:
-    return _CODE_TO_STATUS.get(code, 502)
+    The observed transport status is the truth whenever there is one — it is
+    what the broker (or the hop that answered for it) actually said, and
+    guessing from the error code can only lose information the error already
+    carries. Only a client-synthesized error needs the guess: `network_error`
+    never reached a server (status 0), and `malformed_response` is a 2xx whose
+    envelope did not parse.
+    """
+    if err.http_status >= 400:
+        return err.http_status
+    if err.code == "rate_limited":
+        return 429
+    if err.code == "upstream_timeout":
+        return 504
+    if err.code in ("upstream_unreachable", "network_error"):
+        return 502
+    return 500
 
 
 def _is_transient_upstream_status(status: Any) -> bool:

@@ -150,17 +150,35 @@ def test_error_envelope_maps_code():
     assert exc.value.is_transient()
 
 
-def test_status_for_code_maps_transients():
-    assert broker.status_for_code("rate_limited") == 429
-    assert broker.status_for_code("upstream_timeout") == 504
-    assert broker.status_for_code("upstream_unreachable") == 502
-    assert broker.status_for_code("something_unknown") == 502
-
-
-def test_status_for_code_round_trips_synthesized_gateway_codes():
-    assert broker.status_for_code("broker_unreachable") == 502
-    assert broker.status_for_code("service_unavailable") == 503
-    assert broker.status_for_code("broker_timeout") == 504
+@pytest.mark.parametrize(
+    ("code", "http_status", "expected"),
+    [
+        # The observed status wins outright, whatever the code says.
+        ("rate_limited", 429, 429),
+        ("upstream_timeout", 504, 504),
+        ("upstream_unreachable", 502, 502),
+        ("worker_pool_exhausted", 503, 503),
+        ("broker_unreachable", 502, 502),
+        ("service_unavailable", 503, 503),
+        ("broker_timeout", 504, 504),
+        ("something_unknown", 418, 418),
+        # Statuses the old inverse map collapsed to a blanket 502 — the whole
+        # point of relaying what the broker actually said.
+        ("invalid_request", 400, 400),
+        ("method_not_allowed", 405, 405),
+        ("header_not_allowed", 400, 400),
+        ("internal_error", 500, 500),
+        # Client-synthesized errors are the only ones without a real status:
+        # network_error never reached a server, malformed_response is a 2xx
+        # whose envelope did not parse.
+        ("network_error", 0, 502),
+        ("malformed_response", 200, 500),
+    ],
+)
+def test_relay_status_prefers_the_observed_transport_status(
+    code, http_status, expected
+):
+    assert broker.relay_status(broker.BrokerError(code, http_status, "m")) == expected
 
 
 @pytest.mark.parametrize(

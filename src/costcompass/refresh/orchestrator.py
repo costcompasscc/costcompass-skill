@@ -35,7 +35,7 @@ from .broker import (
     broker_url_from_api,
     build_forward_request,
     provider_error_response,
-    status_for_code,
+    relay_status,
     to_raw_response_payload,
 )
 
@@ -469,13 +469,13 @@ def _run_flat(
             out.append(_synthetic_cap(req.get("url", ""), req.get("purpose", "")))
             return out
         except BrokerError as err:
-            # Relay a provider-error with the broker's mapped status (so the
-            # App Server classifies a rate-limit/timeout correctly rather than
-            # as a generic 502) and continue — one failed sub-request must not
-            # poison the others.
+            # Relay a provider-error with the status the broker reported (so
+            # the App Server classifies a rate-limit/timeout correctly rather
+            # than as a generic 502) and continue — one failed sub-request must
+            # not poison the others.
             out.append(
                 provider_error_response(
-                    status_for_code(err.code),
+                    relay_status(err),
                     req.get("purpose", ""),
                     f"{err.code}: {err}",
                 )

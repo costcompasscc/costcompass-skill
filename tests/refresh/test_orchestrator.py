@@ -1368,8 +1368,40 @@ def test_flat_broker_error_classified_not_502():
         "auth_scheme": None,
     }
     out = orchestrator._run_flat(plan, {"x": "k"}, "tok", brk)
-    assert out[0]["status"] == 429  # mapped from rate_limited, not a generic 502
+    assert out[0]["status"] == 429  # what the broker answered, not a generic 502
     assert "synthetic" not in out[0]
+
+
+def test_flat_broker_error_relays_a_4xx_the_old_map_collapsed():
+    # invalid_request had no row in the retired code→status map, so every
+    # broker rejection of a malformed forward reached the App Server as a 502
+    # — pointing diagnosis at an unreachable provider instead of at the
+    # request this relay sent. It is also non-transient, so no retry.
+    brk = broker.BrokerClient(
+        "https://x/broker/v1",
+        "sk",
+        http=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda r: httpx.Response(
+                    400,
+                    json={
+                        "error": {"code": "invalid_request", "message": "bad target"}
+                    },
+                )
+            )
+        ),
+        retry_attempts=1,
+        sleep=lambda *_: None,
+    )
+    plan = {
+        "requests": [
+            {"url": "https://h/p", "method": "GET", "headers": {}, "purpose": "u"}
+        ],
+        "auth_header": "x",
+        "auth_scheme": None,
+    }
+    out = orchestrator._run_flat(plan, {"x": "k"}, "tok", brk)
+    assert out[0]["status"] == 400
 
 
 def _submit_raising(exc: Exception):
