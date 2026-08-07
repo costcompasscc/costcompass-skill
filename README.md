@@ -35,14 +35,31 @@ failing obscurely.
 
 ## Authenticating
 
-You need an API key from CostCompass (Settings → API keys). Both prompts are
-hidden, so run these in a **real terminal window** — not inside Claude Code,
-whose `!` prefix gives the command no TTY, so the prompt cannot hide your
-keystrokes and the CLI refuses to run rather than echo a secret:
+You need an API key from CostCompass (Settings → API keys). Storing it takes
+two commands — but where you run them, and by what path, both matter:
+
+- **A real terminal window, not Claude Code.** The prompts are hidden, and
+  Claude Code's `!` prefix gives the command no TTY, so the prompt cannot
+  suppress echo. The CLI aborts rather than read a secret in the clear.
+- **By full path.** The bundled CLI is not on your PATH — it lives inside the
+  installed plugin, in a directory named for the plugin version, so it also
+  moves on every update. An alias you write by hand breaks at the next release.
+
+So let the plugin tell you the path. In Claude Code:
 
 ```
-costcompass auth login     # your API key
-costcompass auth vault     # your vault password, needed only for refreshing
+/costcompass:auth-status
+```
+
+It reports what's set up and prints the commands you still need with the real
+path already filled in — copy those into a terminal. (Asking Claude anything
+about your spend before you're set up does the same thing.)
+
+The two commands, for reference, where `<plugin>` is that path:
+
+```
+<plugin>/bin/costcompass auth login   # your API key
+<plugin>/bin/costcompass auth vault   # your vault password, for refreshing
 ```
 
 Each one **verifies before it stores**: the key against the server, the password

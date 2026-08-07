@@ -11,6 +11,22 @@ All commands use the bundled CLI by full path — never a bare `costcompass`:
 ${CLAUDE_PLUGIN_ROOT}/bin/costcompass
 ```
 
+**When you SHOW one of these commands to the user rather than running it
+yourself, substitute the resolved path first.** `CLAUDE_PLUGIN_ROOT` is set in
+your environment, not in the user's shell — and the secret-storing commands
+below are precisely the ones they must run in their own terminal window, where
+it is unset. Handing them `${CLAUDE_PLUGIN_ROOT}/bin/costcompass auth login`
+expands to `/bin/costcompass auth login` and fails with "no such file", which
+looks like a broken install rather than a broken instruction. The path is not
+guessable either: it is inside the installed plugin, under a directory named
+for the plugin version, so it moves on every update.
+
+Resolve it once, and paste the absolute result into your message:
+
+```bash
+echo "$CLAUDE_PLUGIN_ROOT/bin/costcompass"
+```
+
 ## Fix: API key (`ready.spend` false)
 
 Not being set up yet is the **normal first run**, not an error. The user asked
@@ -54,8 +70,9 @@ a local dev stack → `http://localhost:8080/app/settings/api-keys`). Use the
 > ```
 
 Adapt only these: substitute the real settings URL for `<server>/app/settings/api-keys`,
-and append `--url <base>` to the `auth login` line if `server` is not the default
-(e.g. a local dev stack).
+substitute the resolved CLI path (see the top of this file — the user's shell has
+no `CLAUDE_PLUGIN_ROOT`), and append `--url <base>` to the `auth login` line if
+`server` is not the default (e.g. a local dev stack).
 
 **Do not**, in this message:
 
@@ -99,6 +116,10 @@ fix above — two options, no diagnostics, no lecture.
 > ```
 > read -rs COSTCOMPASS_VAULT_PASSWORD && export COSTCOMPASS_VAULT_PASSWORD
 > ```
+
+Substitute the resolved CLI path in that `auth vault` line, for the same reason
+as the `auth login` one above: they run it in their own terminal, where
+`CLAUDE_PLUGIN_ROOT` does not exist.
 
 A third option exists — `vault_password = "…"` in
 `~/.config/costcompass/config.toml` (mode 0600) — but it is **plaintext on
