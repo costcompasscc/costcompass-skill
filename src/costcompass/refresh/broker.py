@@ -47,7 +47,14 @@ _TRANSIENT = {
     "worker_pool_exhausted",
     "internal_error",
     "network_error",
+    # Same retry disposition the statuses they replace already had.
+    "broker_unreachable",
+    "service_unavailable",
+    "broker_timeout",
 }
+# Codes the broker itself can send. The three synthesized 5xx codes are
+# deliberately absent: if one ever arrived in an envelope it would fall
+# through to _STATUS_TO_CODE, which is where it belongs.
 _KNOWN_CODES = {
     "invalid_request",
     "host_not_allowed",
@@ -62,15 +69,20 @@ _KNOWN_CODES = {
     "internal_error",
     "worker_pool_exhausted",
 }
+# Guess a code for an error response that carried no envelope. Only the 4xx
+# rows can name a broker code: those mean the same thing whoever wrote them.
+# A 5xx cannot — reaching here means the broker did not answer, so the status
+# came from a hop in between (proxy, load balancer, edge) and says nothing
+# about the broker's internals or the provider.
 _STATUS_TO_CODE = {
     400: "invalid_request",
     401: "unauthenticated",
     403: "forbidden",
     413: "payload_too_large",
     429: "rate_limited",
-    502: "upstream_unreachable",
-    503: "worker_pool_exhausted",
-    504: "upstream_timeout",
+    502: "broker_unreachable",
+    503: "service_unavailable",
+    504: "broker_timeout",
 }
 
 # Inverse: map a broker error code to the HTTP status the App Server's
@@ -85,6 +97,9 @@ _CODE_TO_STATUS = {
     "payload_too_large": 413,
     "unauthenticated": 401,
     "forbidden": 403,
+    "broker_unreachable": 502,
+    "service_unavailable": 503,
+    "broker_timeout": 504,
 }
 
 

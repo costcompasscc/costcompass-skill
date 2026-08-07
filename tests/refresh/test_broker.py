@@ -157,6 +157,47 @@ def test_status_for_code_maps_transients():
     assert broker.status_for_code("something_unknown") == 502
 
 
+def test_status_for_code_round_trips_synthesized_gateway_codes():
+    assert broker.status_for_code("broker_unreachable") == 502
+    assert broker.status_for_code("service_unavailable") == 503
+    assert broker.status_for_code("broker_timeout") == 504
+
+
+@pytest.mark.parametrize(
+    ("status", "code"),
+    [
+        (502, "broker_unreachable"),
+        (503, "service_unavailable"),
+        (504, "broker_timeout"),
+    ],
+)
+def test_bodyless_gateway_status_does_not_name_broker_internals(status, code):
+    # A 5xx with no envelope means the broker never answered — some hop in
+    # between wrote it. Naming a broker-internal code there points diagnosis at
+    # the wrong service, so these three statuses get their own synthesized
+    # codes. They must stay transient: that is the retry behaviour the codes
+    # they replaced already had.
+    client = make_broker(lambda r: httpx.Response(status, content=b""))
+    with pytest.raises(broker.BrokerError) as exc:
+        client.forward({"target": {}, "headers": {}})
+    assert exc.value.code == code
+    assert exc.value.http_status == status
+    assert exc.value.is_transient()
+
+
+def test_envelope_bearing_503_still_names_the_worker_pool():
+    client = make_broker(
+        lambda r: httpx.Response(
+            503,
+            json={"error": {"code": "worker_pool_exhausted", "message": "at capacity"}},
+        )
+    )
+    with pytest.raises(broker.BrokerError) as exc:
+        client.forward({"target": {}, "headers": {}})
+    assert exc.value.code == "worker_pool_exhausted"
+    assert exc.value.is_transient()
+
+
 def test_provider_error_response_is_classifiable():
     r = broker.provider_error_response(429, "usage", "rate_limited: slow")
     assert r["status"] == 429
