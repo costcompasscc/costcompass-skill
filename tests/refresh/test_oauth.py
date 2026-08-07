@@ -250,8 +250,12 @@ def test_resolver_write_back_failure_raises_oauth_error():
 NO_JITTER = {"sleep": lambda _s: None, "random": lambda: 0.0}
 
 
-def _rotating_resolver(api_handler, *, sentinel="rt-old"):
-    """A resolver whose mint always rotates rt-old -> rt-new."""
+def _rotating_resolver(api_handler, *, sentinel="rt-old", vault=None):
+    """A resolver whose mint always rotates rt-old -> rt-new.
+
+    Pass ``vault`` to keep a handle on the caller's object — the run's ONE
+    vault, which the orchestrator reads too.
+    """
 
     def oauth_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -274,7 +278,7 @@ def _rotating_resolver(api_handler, *, sentinel="rt-old"):
             "sk",
             http=httpx.Client(transport=httpx.MockTransport(api_handler)),
         ),
-        _vault_with_sentinel(sentinel),
+        vault if vault is not None else _vault_with_sentinel(sentinel),
         PASSWORD,
     )
 
@@ -293,7 +297,8 @@ def test_rotation_write_back_retries_onto_the_fresh_document():
         # The server moved to revision 11 under us, sentinel still rt-old.
         return httpx.Response(200, json=_vault_blob("rt-old", 11))
 
-    resolver = _rotating_resolver(api_handler)
+    v = _vault_with_sentinel("rt-old")
+    resolver = _rotating_resolver(api_handler, vault=v)
     outcome = resolver._persist_rotated_sentinel(
         "google", "__google_oauth__", "rt-old", "rt-new", **NO_JITTER
     )
@@ -303,6 +308,12 @@ def test_rotation_write_back_retries_onto_the_fresh_document():
     assert resolver._vault.entry_for("google", "__google_oauth__")["api_key"] == (
         "rt-new"
     )
+    # And the CALLER sees it, because there is one vault per run. The reload
+    # this retry performed must not have detached the orchestrator's view: it
+    # resolves later cards' direct ``vault_key`` lookups off this object.
+    assert v is resolver._vault
+    assert v.entry_for("google", "__google_oauth__")["api_key"] == "rt-new"
+    assert v.revision == 12
 
 
 def test_rotation_write_back_stops_when_another_relay_already_saved_it():
@@ -560,12 +571,16 @@ def test_rotation_write_back_does_not_retry_a_non_conflict_failure():
 
 def test_rotation_write_back_failure_leaves_no_unsaved_edit_behind():
     # A rotation we report as FAILED must not ride along on someone else's
-    # later write. The resolver mutates the in-memory document before
-    # uploading, and that document outlives this call: without a revert, the
-    # next successful write_back in the same run (another provider's rotation,
-    # at a revision that still validates) would quietly persist the token we
-    # just told the user was lost — a card saying "reconnect" over a vault
-    # that actually holds the new token.
+    # later write. The document outlives this call and the orchestrator reads
+    # it too, so a rotation applied before the server accepted it would be both
+    # readable as a credential and quietly persisted by the next successful
+    # write_back in the same run (another provider's rotation, at a revision
+    # that still validates) — a card saying "reconnect" over a vault that
+    # actually holds the new token.
+    #
+    # Now unreachable by construction: the rotation is applied to a candidate
+    # copy and adopted only once PUT /vault returns. This still pins the
+    # OUTCOME, which is what a future refactor could take away.
     bodies = []
     accept_writes = False
 
@@ -599,11 +614,11 @@ def test_rotation_write_back_failure_leaves_no_unsaved_edit_behind():
     assert [e["api_key"] for e in saved] == ["rt-old"]
 
 
-def test_rotation_write_back_restores_on_an_unmodelled_exception():
-    # The restore must not depend on us having enumerated the exception. Any
-    # failure leaves the document unaccepted, so an error type the handlers
-    # do not name must still not leave the rotated token sitting in the
-    # long-lived in-memory vault for someone else's write to carry along.
+def test_rotation_write_back_leaves_the_document_clean_on_an_unmodelled_exception():
+    # Cleanliness must not depend on us having enumerated the exception. This
+    # used to be an undo in a ``finally`` — correct, but only as complete as the
+    # exits it covered. Writing to a candidate makes an unnamed error type
+    # indistinguishable from a named one: the run's vault was never touched.
     class Unmodelled(Exception):
         pass
 
@@ -863,3 +878,89 @@ def test_resolver_no_sentinel_raises():
     resolver = oauth.OAuthResolver(oauth_client, api_client, empty, PASSWORD)
     with pytest.raises(oauth.OAuthError, match="Reconnect"):
         resolver.access_token("google", "__google_oauth__", "/google/mint")
+
+
+# ---- one vault owner per run -------------------------------------------
+#
+# LOCKSTEP INVARIANT (browser invariant 11): the resolver and the orchestrator
+# read ONE vault document, holding committed state only. `run` builds a single
+# `Vault` and hands the same object to both, so the tests below assert on the
+# CALLER's object — the one `_resolve_credential` reads for every card's direct
+# `vault_key` lookup — not on `resolver._vault`.
+#
+# The failure it guards is quiet: `_reload_vault` used to rebind `self._vault`
+# to the object `fetch_and_decrypt` returns, which detached the orchestrator
+# from the resolver mid-run. Nothing raised; later cards simply resolved
+# against the run-start document forever.
+
+
+def test_a_mid_run_reload_reaches_the_orchestrators_view_of_the_vault():
+    # The reloaded document carries a pasted key that did not exist at run
+    # start — the user re-pasted it in the browser while this run was in
+    # flight. It is the only place that value exists, so reading it is proof of
+    # which document the caller is holding.
+    server_entries = [
+        {
+            "id": "g",
+            "provider": "google",
+            "api_key": "rt-old",
+            "metadata": {"instance_key": "__google_oauth__"},
+        },
+        {
+            "id": "o",
+            "provider": "openai",
+            "api_key": "sk-reloaded",
+            "metadata": {"instance_key": ""},
+        },
+    ]
+    puts = []
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PUT":
+            puts.append(1)
+            if len(puts) == 1:
+                return httpx.Response(409, json={"error": "revision conflict"})
+            return httpx.Response(200, json={"revision": 12, "updated_at": "z"})
+        return httpx.Response(
+            200, json=_vault_blob("rt-old", 11, entries=server_entries)
+        )
+
+    v = _vault_with_sentinel("rt-old")
+    assert v.entry_for("openai", "") is None  # absent at run start
+
+    resolver = _rotating_resolver(api_handler, vault=v)
+    outcome = resolver._persist_rotated_sentinel(
+        "google", "__google_oauth__", "rt-old", "rt-new", **NO_JITTER
+    )
+    assert outcome is oauth.RotationPersistOutcome.PERSISTED
+
+    # One vault: the reload landed on the caller's object, so a card resolved
+    # after this point sees the key the user just pasted rather than a miss.
+    assert v is resolver._vault
+    assert v.entry_for("openai", "")["api_key"] == "sk-reloaded"
+
+
+def test_a_rotation_the_server_refused_is_never_readable_from_the_vault():
+    # The other half of the invariant. A sentinel is addressed by
+    # (provider, sentinel_key) and a card by (provider, instance_key), so a
+    # card whose instance_key EQUALS the sentinel key resolves to the sentinel
+    # row itself. That collision does not occur in production — sentinel keys
+    # are `__provider_oauth__`-shaped and server-authored — but relying on it
+    # is exactly what "committed state only" removes, and an assumption no test
+    # states is one a refactor can silently break.
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PUT":
+            # Non-transient: no retry, no reload, the rotation is simply lost.
+            return httpx.Response(500, json={"error": "boom"})
+        return httpx.Response(200, json=_vault_blob("rt-old", 11))
+
+    v = _vault_with_sentinel("rt-old")
+    resolver = _rotating_resolver(api_handler, vault=v)
+    with pytest.raises(oauth.OAuthError):
+        resolver._persist_rotated_sentinel(
+            "google", "__google_oauth__", "rt-old", "rt-new", **NO_JITTER
+        )
+
+    # A direct lookup reads what the vault actually holds, never the rotation
+    # we just reported as unsaveable.
+    assert v.entry_for("google", "__google_oauth__")["api_key"] == "rt-old"

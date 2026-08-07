@@ -25,6 +25,7 @@ so adding an OAuth provider never touches this file.
 
 from __future__ import annotations
 
+import copy
 import random as _random
 import threading
 import time
@@ -116,18 +117,6 @@ def _conflict_backoff_secs(attempt: int, random: Callable[[], float]) -> float:
     correct with this forced to zero, and a test pins that.
     """
     return (0.05 + attempt * 0.1) * (0.5 + random())
-
-
-def _restore_api_key(entry: dict[str, Any], previous: str | None) -> None:
-    """Undo a speculative ``api_key`` edit on a vault entry.
-
-    ``previous`` is whatever ``entry.get("api_key")`` returned before the edit,
-    so a missing key restores to missing rather than to an empty string.
-    """
-    if previous is None:
-        entry.pop("api_key", None)
-    else:
-        entry["api_key"] = previous
 
 
 def _rotation_persist_failed(provider: str, cause: Exception) -> OAuthError:
@@ -236,6 +225,16 @@ class OAuthResolver:
     ) -> None:
         self._oauth = oauth_client
         self._api = api_client
+        # LOCKSTEP: one vault owner per run, holding committed state only. This
+        # is the caller's object, not a copy — ``run`` passes the same ``Vault``
+        # to the orchestrator's per-entry loop, whose direct ``vault_key``
+        # lookups read it. ``_adopt`` keeps it that way by mutating in place, so
+        # a mid-run reload is visible to every card resolved after it; the
+        # rotation write-back never applies an edit the server has not accepted,
+        # so no card can read a value the vault does not hold. The browser
+        # reaches the same end through a ``VaultEntryReader`` handle refreshed
+        # behind it, macOS through an actor-isolated accessor on the resolver.
+        # See invariant 11 in frontend/src/lib/refresh/CLAUDE.md.
         self._vault = vault
         self._password = password
         self._access_cache: dict[str, str] = {}
@@ -272,13 +271,13 @@ class OAuthResolver:
         # whole mint round-trip) than this one ever is.
         self._sentinel_locks: dict[str, threading.Lock] = {}
         self._sentinel_locks_guard = threading.Lock()
-        # Serializes every read, rebind and write-back of ``self._vault``. The
-        # document is shared by all sentinels, and ``_persist_rotated_sentinel``
-        # applies a SPECULATIVE ``entry["api_key"]`` to it that it restores in a
-        # ``finally``; a concurrent rotation's ``write_back`` would otherwise
-        # serialize that uncommitted edit and persist a rotation we reported as
-        # failed. Re-entrant because the persist loop calls ``_reload_vault`` /
-        # ``_sentinel_token``, which take it too.
+        # Serializes every read, adopt and write-back of ``self._vault``. The
+        # document is shared by all sentinels AND by the orchestrator, and a
+        # persist is a read-modify-write of it spanning a network round-trip;
+        # without this, two concurrent rotations each build a candidate from the
+        # same document and the second to land silently drops the first.
+        # Re-entrant because the persist loop calls ``_reload_vault`` /
+        # ``_sentinel_token`` / ``_adopt``, which take it too.
         #
         # LOCK ORDER is always sentinel lock → vault lock, never the reverse.
         # Nothing takes a sentinel lock while holding this one.
@@ -436,10 +435,13 @@ class OAuthResolver:
         and only the caller knows whether a stale grant matters (it does for a
         fetch; it doesn't for an off-refresh probe).
 
-        Serialized across the whole run by ``_vault_lock``: the speculative
-        ``entry["api_key"]`` below is uncommitted until the server accepts it,
-        so a concurrent rotation of a DIFFERENT provider — reachable now that
-        entries fan out — must not reach ``write_back`` while it is applied.
+        Serialized across the whole run by ``_vault_lock``: a persist is a
+        read-modify-write of the run's one vault document spanning a network
+        round-trip, so a concurrent rotation of a DIFFERENT provider —
+        reachable now that entries fan out — would otherwise build its
+        candidate from a document this one is about to replace, and upload at a
+        revision this one is about to bump. One of the two rotations would be
+        silently dropped.
         """
         with self._vault_lock:
             return self._persist_rotated_sentinel_locked(
@@ -466,31 +468,35 @@ class OAuthResolver:
         """``_persist_rotated_sentinel`` minus the locking; callers hold
         ``_vault_lock``."""
         for attempt in range(attempts):
-            # Re-resolve the sentinel every pass: a reauth-retry or a reload
-            # below may have swapped ``self._vault`` for a server-fresh doc,
-            # so an entry bound earlier could point into the stale document.
-            entry = self._vault.entry_for(provider, sentinel_key)
+            # Apply the rotation to a CANDIDATE and adopt it only once the
+            # server has accepted it. ``self._vault`` is the run's ONE vault —
+            # the orchestrator's direct ``vault_key`` lookups read the same
+            # object, and it outlives this function — so an edit applied ahead
+            # of the write would be readable as a credential, and a later
+            # write_back in the same run (another provider's rotation, at a
+            # revision that still validates) would carry the unsaved field along
+            # and persist a rotation we reported as failed. A copy leaves no
+            # window to undo rather than an undo that must cover every exit.
+            #
+            # Rebuilt every pass rather than hoisted: a reauth-retry or a reload
+            # below may have replaced the document with a server-fresh one, and
+            # the candidate must be taken from whichever is current now.
+            candidate = vault_mod.Vault(
+                doc=copy.deepcopy(self._vault.doc),
+                p2s=self._vault.p2s,
+                p2c=self._vault.p2c,
+                revision=self._vault.revision,
+            )
+            entry = candidate.entry_for(provider, sentinel_key)
             if entry is None:
                 # Gone before we could write. The mint read this sentinel
                 # moments ago, so it disappearing means the user disconnected
                 # the provider mid-run.
                 return RotationPersistOutcome.SENTINEL_VANISHED
-            previous = entry.get("api_key")
             entry["api_key"] = rotated
-            persisted = False
-            # The restore lives in ``finally``, not in the except clauses: the
-            # edit is speculative until the server accepts it, and the document
-            # outlives this function. A later write_back in the same run
-            # (another provider's rotation, at a revision that still validates)
-            # would otherwise carry our unsaved field along and persist a
-            # rotation we reported as failed. Restoring on EVERY non-persisted
-            # exit — including an exception we do not model — is what keeps that
-            # impossible; a per-except restore silently misses the ones it does
-            # not name. The next attempt re-applies onto whatever document is
-            # current by then.
             try:
-                vault_mod.write_back(self._api, self._vault, self._password)
-                persisted = True
+                vault_mod.write_back(self._api, candidate, self._password)
+                self._adopt(candidate)
                 return RotationPersistOutcome.PERSISTED
             except api.VaultRevisionConflict as exc:
                 if attempt >= attempts - 1:
@@ -543,15 +549,31 @@ class OAuthResolver:
                     )
             except (api.ApiError, vault_mod.VaultError) as exc:
                 raise _rotation_persist_failed(provider, exc) from exc
-            finally:
-                if not persisted:
-                    _restore_api_key(entry, previous)
         # Unreachable for any sane budget: the final attempt either returns or
         # raises. Only a caller passing attempts <= 0 falls through, and an
         # unsaved rotation must never look like a successful one.
         raise _rotation_persist_failed(
             provider, ValueError(f"no write-back attempts made (attempts={attempts})")
         )
+
+    def _adopt(self, fresh: vault_mod.Vault) -> None:
+        """Make ``fresh`` the run's vault, mutating IN PLACE.
+
+        Never ``self._vault = fresh``. The orchestrator holds the same object
+        and reads it for every card's direct ``vault_key`` lookup, so a rebind
+        would leave it on the run-start document forever while this resolver
+        moved on — one run resolving two cards against two different vaults.
+        Assigning the fields keeps one vault per run, which is the shape the
+        browser gets from its ``VaultEntryReader`` handle for free.
+        """
+        with self._vault_lock:
+            v = self._vault
+            v.doc, v.p2s, v.p2c, v.revision = (
+                fresh.doc,
+                fresh.p2s,
+                fresh.p2c,
+                fresh.revision,
+            )
 
     def _reload_vault(self) -> bool:
         """Adopt the server's current vault document, returning success.
@@ -562,9 +584,10 @@ class OAuthResolver:
         """
         with self._vault_lock:
             try:
-                self._vault = vault_mod.fetch_and_decrypt(self._api, self._password)
+                fresh = vault_mod.fetch_and_decrypt(self._api, self._password)
             except (api.ApiError, vault_mod.VaultError):
                 return False
+            self._adopt(fresh)
             return True
 
     def _sentinel_token(self, provider: str, sentinel_key: str) -> str | None:

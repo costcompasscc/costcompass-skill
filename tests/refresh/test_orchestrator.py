@@ -1459,3 +1459,172 @@ def test_submit_failure_keeps_a_local_message_over_the_generic_reason():
     )
     assert outcome.state == "skipped"
     assert outcome.error_message == "this card has no key on this device"
+
+
+def test_a_card_resolved_after_a_mid_run_reload_reads_the_reloaded_document():
+    # LOCKSTEP INVARIANT (browser invariant 11): one vault owner per run. The
+    # resolver and this orchestrator loop read the SAME `Vault` object, so a
+    # reload the resolver performs mid-run decides later cards too.
+    #
+    # `_reload_vault` used to rebind `self._vault`, which detached the two
+    # silently — every later direct `vault_key` lookup kept reading the
+    # run-start document, and nothing raised. Here the pasted openai key exists
+    # only in the reloaded document, so the credential the second card forwards
+    # names which one the loop is holding.
+    #
+    # Width 1: the assertion is about ORDER (card 2 resolves after card 1's
+    # reload), which the default fan-out would not guarantee.
+    run_start = [
+        {
+            "id": "cf",
+            "provider": "cloudflare",
+            "api_key": "rt-current",
+            "metadata": {"instance_key": "__cloudflare_oauth__"},
+        },
+        {
+            "id": "o",
+            "provider": "openai",
+            "api_key": "sk-runstart",
+            "metadata": {"instance_key": ""},
+        },
+    ]
+    reloaded = [
+        {
+            "id": "cf",
+            "provider": "cloudflare",
+            "api_key": "rt-next",
+            "metadata": {"instance_key": "__cloudflare_oauth__"},
+        },
+        {
+            "id": "o",
+            "provider": "openai",
+            "api_key": "sk-reloaded",
+            "metadata": {"instance_key": ""},
+        },
+    ]
+
+    def card(provider, instance_key, credential=None):
+        entry = {
+            "provider_id": provider,
+            "instance_key": instance_key,
+            "state": "pending",
+            "signing_token": f"tok-{provider}",
+            "plan": {
+                "requests": [
+                    {
+                        "url": f"https://h/{provider}",
+                        "method": "GET",
+                        "headers": {},
+                        "body": None,
+                        "purpose": "usage",
+                    }
+                ],
+                "auth_header": "x-api-key",
+                "auth_scheme": None,
+            },
+        }
+        if credential is not None:
+            entry["credential"] = credential
+        return entry
+
+    run = {
+        "run_id": "run-1",
+        "fetches": [
+            card(
+                "cloudflare",
+                "acct-1",
+                {
+                    "kind": "oauth_mint",
+                    "sentinel_key": "__cloudflare_oauth__",
+                    "mint_path": "/cloudflare/mint",
+                },
+            ),
+            card("openai", ""),
+        ],
+    }
+    vault_gets = []
+    puts = []
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        p_, m = request.url.path, request.method
+        if m == "GET" and p_.endswith("/vault"):
+            vault_gets.append(1)
+            entries = run_start if len(vault_gets) == 1 else reloaded
+            return httpx.Response(
+                200,
+                json={"jwe": _vault_blob(entries), "revision": 1, "updated_at": "x"},
+            )
+        if m == "PUT" and p_.endswith("/vault"):
+            puts.append(1)
+            # The write-back loses the revision race, which is what forces the
+            # reload. The reloaded document already holds the token we minted,
+            # so it then settles as PERSISTED with no second PUT — the rotation
+            # is the trigger here, not the subject.
+            return httpx.Response(409, json={"error": "revision conflict"})
+        if m == "POST" and p_.endswith("/fetch-runs"):
+            return httpx.Response(200, json=run)
+        if "/responses" in p_:
+            return httpx.Response(200, json={"state": "success", "events_ingested": 1})
+        if "/finalize" in p_:
+            return httpx.Response(
+                200, json={"run_id": "run-1", "status": "success", "providers": []}
+            )
+        if p_.endswith("/dashboard/summary"):
+            return httpx.Response(200, json={"mtd_usd": 0.0})
+        return httpx.Response(404)
+
+    def oauth_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "access_token": "at",
+                "expires_at_utc_secs": 9999,
+                "refresh_token": "rt-next",
+            },
+        )
+
+    forwarded: list[dict] = []
+
+    def broker_handler(request: httpx.Request) -> httpx.Response:
+        forwarded.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={"status": 200, "headers": {}, "body": "Yg==", "signature": "sig"},
+        )
+
+    client = api.Client(
+        "https://x/api/v1",
+        "sk",
+        http=httpx.Client(transport=httpx.MockTransport(api_handler)),
+    )
+    oauth_client = oauth.OAuthBrokerClient(
+        "https://x/oauth/v1",
+        "sk",
+        http=httpx.Client(transport=httpx.MockTransport(oauth_handler)),
+    )
+    brk = broker.BrokerClient(
+        "https://x/broker/v1",
+        "sk",
+        http=httpx.Client(transport=httpx.MockTransport(broker_handler)),
+    )
+    cfg = config.Config(api_key="sk", api_url="https://x/api/v1")
+    result = orchestrator.run(
+        cfg,
+        "sk",
+        None,
+        PASSWORD,
+        client=client,
+        broker=brk,
+        oauth_client=oauth_client,
+        echo=lambda *_: None,
+        concurrency=1,
+    )
+
+    assert [o.state for o in result.outcomes] == ["success", "success"]
+    assert len(vault_gets) == 2  # run start, then the conflict's reload
+    # The OAuth card fetched with the minted token, unchanged by any of this.
+    assert forwarded[0]["headers"]["x-api-key"] == "at"
+    # The pasted-key card fetched with the key from the RELOADED document.
+    # Reading a detached run-start copy yields "sk-runstart" — the key the user
+    # just replaced, which the provider would reject.
+    assert forwarded[1]["headers"]["x-api-key"] == "sk-reloaded"

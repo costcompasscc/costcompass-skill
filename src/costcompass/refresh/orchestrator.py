@@ -292,6 +292,13 @@ def _resolve_credential(
     (``oauth_mint``) and skips the rest via ``CredentialSkip`` (a keyless
     ``vault_key`` row, an ``oauth_installation_grant`` it can't mint, or any
     unknown kind). No provider knowledge lives here — it's all server-authored.
+
+    ``vault`` is the run's ONE vault document, the same object the resolver
+    holds — see the ownership note on ``OAuthResolver.__init__``. That is what
+    makes the direct lookup below observe a mid-run reload, and what guarantees
+    it can never observe a rotation the server has not accepted. Reading it
+    here without ``_vault_lock`` is safe for that second reason: the only
+    mutation is ``_adopt`` assigning fields of an already-committed document.
     """
     provider = entry["provider_id"]
     instance = entry.get("instance_key", "")
