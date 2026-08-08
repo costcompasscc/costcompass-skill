@@ -283,6 +283,24 @@ class OAuthResolver:
         # LOCK ORDER is always sentinel lock → vault lock, never the reverse.
         # Nothing takes a sentinel lock while holding this one.
         self._vault_lock = threading.RLock()
+        # Collapses redundant re-syncs, the counterpart of the browser's shared
+        # in-flight promise in ``resyncFromServer``. ``_vault_lock`` already
+        # serializes reloads, so the waste it leaves is a caller re-fetching a
+        # document another thread installed while it waited — a whole GET
+        # /vault plus a whole PBKDF2 derivation, at the one moment the run is
+        # already slow. A counter rather than a shared promise because there is
+        # no promise to hand out here: the second caller is blocked on a lock,
+        # not awaiting a future, so it can only ask afterwards whether its own
+        # fetch is still needed.
+        #
+        # ``_reload_seq`` counts reloads BEGUN, and bumping at the start is what
+        # makes the freshness claim in ``_reload_vault`` true rather than merely
+        # plausible — see the sampling comment there.
+        self._reload_seq = 0
+        # The ``_reload_seq`` of the last reload that SUCCEEDED. Separate so a
+        # caller never rides a fetch that errored: a failed reload leaves this
+        # behind and the next caller does its own.
+        self._reload_done_seq = 0
 
     def _sentinel_lock(self, provider: str, sentinel_key: str) -> threading.Lock:
         """The resolution lock for one grant, created on first use."""
@@ -582,13 +600,32 @@ class OAuthResolver:
         Adopting the fresh document (and its revision) is what lets a
         subsequent write-back target the revision the server actually holds
         instead of conflicting on a stale one.
+
+        Deduped: a caller whose reload was overtaken by a newer one skips its
+        own fetch. It rides that document only when the reload BEGAN after this
+        caller asked, so the document provably reflects everything up to the
+        conflict or mint failure that sent us here — riding an older in-flight
+        fetch could miss a write made in between, burn one of the three
+        write-back attempts, and turn a savable rotation into a reported
+        failure.
         """
+        # Sampled BEFORE the lock, so it is the count of reloads begun as of the
+        # moment this caller asked. A reload already in flight has bumped the
+        # counter at its start, i.e. before this read, so it cannot inflate the
+        # comparison below; only a reload that began afterwards can. That is the
+        # whole reason the bump is at the start and not on completion.
+        seq = self._reload_seq
         with self._vault_lock:
+            if self._reload_done_seq > seq:
+                return True
+            self._reload_seq += 1
+            mine = self._reload_seq
             try:
                 fresh = vault_mod.fetch_and_decrypt(self._api, self._password)
             except (api.ApiError, vault_mod.VaultError):
                 return False
             self._adopt(fresh)
+            self._reload_done_seq = mine
             return True
 
     def _sentinel_token(self, provider: str, sentinel_key: str) -> str | None:

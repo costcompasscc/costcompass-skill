@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 
 import httpx
 import pytest
@@ -967,3 +968,162 @@ def test_a_rotation_the_server_refused_is_never_readable_from_the_vault():
     # A direct lookup reads what the vault actually holds, never the rotation
     # we just reported as unsaveable.
     assert v.entry_for("google", "__google_oauth__")["api_key"] == "rt-old"
+
+
+# ---- concurrent vault re-syncs -----------------------------------------
+#
+# LOCKSTEP: the browser collapses concurrent re-syncs into one shared in-flight
+# promise (`resyncFromServer`). This port cannot share a promise — the second
+# caller is blocked on `_vault_lock`, not awaiting a future — so it asks after
+# the wait whether its own fetch is still needed, and skips only when a reload
+# that BEGAN after it asked has already succeeded. The tests below pin both
+# halves: the skip, and the freshness rule that limits it.
+#
+# The interleaving is forced, never slept for. `_ArrivalLock` announces the
+# moment a thread commits to acquiring the vault lock, which is one statement
+# after `_reload_vault` samples its sequence number — so every ordering below
+# is deterministic on any machine.
+
+
+class _ArrivalLock:
+    """The resolver's vault lock, announcing each thread that arrives at it."""
+
+    def __init__(self, inner, on_arrival):
+        self._inner = inner
+        self._on_arrival = on_arrival
+
+    def __enter__(self):
+        self._on_arrival(threading.current_thread().name)
+        return self._inner.__enter__()
+
+    def __exit__(self, *exc):
+        return self._inner.__exit__(*exc)
+
+
+def _reload_race(api_handler, names, call):
+    """Run ``call(resolver)`` on one thread per name, with the FIRST thread
+    parked inside its GET until every other thread is waiting on the vault
+    lock. Returns ``(resolver, results_by_name)``."""
+    resolver = _rotating_resolver(api_handler)
+    arrived = {name: threading.Event() for name in names}
+    resolver._vault_lock = _ArrivalLock(
+        resolver._vault_lock, lambda name: arrived[name].set()
+    )
+    results: dict[str, object] = {}
+
+    threads = [
+        threading.Thread(
+            target=lambda n=name: results.__setitem__(n, call(resolver)), name=name
+        )
+        for name in names
+    ]
+    threads[0].start()
+    # The leader is inside its GET (its handler sets this), so it holds the
+    # lock and every follower below is guaranteed to queue behind it.
+    assert _RACE["leader_fetching"].wait(10)
+    for t in threads[1:]:
+        t.start()
+    for name in names[1:]:
+        assert arrived[name].wait(10), f"{name} never reached the vault lock"
+    _RACE["followers_ready"].set()
+    for t in threads:
+        t.join(10)
+        assert not t.is_alive()
+    return resolver, results
+
+
+_RACE = {"leader_fetching": threading.Event(), "followers_ready": threading.Event()}
+
+
+def _race_handler(responses):
+    """A GET handler serving ``responses`` in order, parking the first caller
+    until the followers are queued on the lock. Records the calls it served."""
+    served: list[int] = []
+    guard = threading.Lock()
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        with guard:
+            served.append(len(served))
+            nth = len(served)
+        if nth == 1:
+            _RACE["leader_fetching"].set()
+            assert _RACE["followers_ready"].wait(10)
+        return responses[nth - 1]()
+
+    return api_handler, served
+
+
+@pytest.fixture(autouse=True)
+def _reset_race_events():
+    _RACE["leader_fetching"].clear()
+    _RACE["followers_ready"].clear()
+
+
+def test_a_reload_that_began_after_we_asked_is_ridden_rather_than_repeated():
+    # Three cards hit the mint-409 reauth path at once — the shape a shared
+    # rotating token consumed by another relay produces. The third caller's
+    # request is fully covered by the second caller's fetch (which began after
+    # it asked), so it must not pay another GET + PBKDF2.
+    fresh = _vault_blob("rt-fresh", 11)
+    handler, served = _race_handler([lambda: httpx.Response(200, json=fresh)] * 3)
+
+    resolver, results = _reload_race(
+        handler,
+        ["A", "B", "C"],
+        lambda r: r._reload_sentinel_token("google", "__google_oauth__"),
+    )
+
+    # Two fetches for three callers: the leader's, and one more for the pair
+    # that arrived while it was in flight. Never three.
+    assert len(served) == 2
+    # Every caller ends up reading the same server-current sentinel, including
+    # the one that never fetched.
+    assert results == {"A": "rt-fresh", "B": "rt-fresh", "C": "rt-fresh"}
+    assert resolver._vault.revision == 11
+
+
+def test_a_reload_that_began_before_we_asked_is_never_ridden():
+    # The freshness rule, and the reason the sequence number is bumped when a
+    # reload BEGINS. The leader's GET may predate the follower's 409, so it
+    # cannot answer for it — riding it would let the follower act on a document
+    # older than its own failure, burn a write-back attempt, and report a
+    # savable rotation as lost.
+    first = _vault_blob("rt-stale", 11)
+    second = _vault_blob("rt-fresh", 12)
+    handler, served = _race_handler(
+        [
+            lambda: httpx.Response(200, json=first),
+            lambda: httpx.Response(200, json=second),
+        ]
+    )
+
+    resolver, results = _reload_race(handler, ["A", "B"], lambda r: r._reload_vault())
+
+    assert len(served) == 2  # the follower fetched for itself
+    assert results == {"A": True, "B": True}
+    assert resolver._vault.revision == 12
+
+
+def test_a_reload_that_failed_is_never_ridden():
+    # A skip claims another caller installed a fresh document. A fetch that
+    # errored installed nothing, so it must leave the followers to do their own
+    # — otherwise a transient 500 would silently hand every later caller the
+    # run-start document while telling it the re-sync succeeded.
+    fresh = _vault_blob("rt-fresh", 11)
+    handler, served = _race_handler(
+        [
+            lambda: httpx.Response(200, json=fresh),
+            lambda: httpx.Response(500, json={"error": "boom"}),
+            lambda: httpx.Response(200, json=fresh),
+        ]
+    )
+
+    resolver, results = _reload_race(
+        handler, ["A", "B", "C"], lambda r: r._reload_vault()
+    )
+
+    assert len(served) == 3  # nobody rode the failed fetch
+    assert sorted(results.values(), key=str) == [False, True, True]
+    assert resolver._vault.entry_for("google", "__google_oauth__")["api_key"] == (
+        "rt-fresh"
+    )
