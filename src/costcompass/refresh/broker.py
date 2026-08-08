@@ -25,7 +25,8 @@ import base64
 import json
 import threading
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
@@ -89,14 +90,8 @@ _STATUS_TO_CODE = {
 def relay_status(err: BrokerError) -> int:
     """The status to relay to the App Server for a failed forward, so its
     taxonomy classifies a rate-limit/timeout/bad-request correctly instead of
-    collapsing every broker failure to a generic 502.
-
-    The observed transport status is the truth whenever there is one — it is
-    what the broker (or the hop that answered for it) actually said, and
-    guessing from the error code can only lose information the error already
-    carries. Only a client-synthesized error needs the guess: `network_error`
-    never reached a server (status 0), and `malformed_response` is a 2xx whose
-    envelope did not parse.
+    collapsing every broker failure to a generic 502. Observed status wins,
+    guess only for a client-synthesized error — service-broker-spec.md §4.
     """
     if err.http_status >= 400:
         return err.http_status
@@ -242,8 +237,7 @@ def broker_url_from_api(api_url: str) -> str:
     `https://host/api/v1` -> `https://host/broker/v1`.
     """
     base = api_url.rstrip("/")
-    if base.endswith("/api/v1"):
-        base = base[: -len("/api/v1")]
+    base = base.removesuffix("/api/v1")
     return f"{base}/broker/v1"
 
 
