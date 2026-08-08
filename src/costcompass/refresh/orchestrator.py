@@ -18,9 +18,14 @@ broker, and relays the broker-signed responses back for ingest.
 from __future__ import annotations
 
 import base64
+import contextlib
+import fcntl
+import os
 import sys
 import threading
 import time
+from collections.abc import Generator
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Any, Callable, TypeVar
 
@@ -100,6 +105,56 @@ class RefreshDeadlineExceeded(RefreshError):
     Subclasses ``RefreshError`` so ``main.py``'s existing handler catches it
     with no change there.
     """
+
+
+class RefreshAlreadyRunning(RefreshError):
+    """Another refresh already holds the run lock.
+
+    Subclasses ``RefreshError`` for the same reason as above: ``main.py``
+    reports it through ``_fail``, so the user gets the sentence and a non-zero
+    exit rather than a silent no-op.
+    """
+
+
+# The sentence the other two relays show for the same refusal (macOS
+# ``ErrorText``, the browser hook's ``ALREADY_RUNNING``), so one refusal reads
+# identically wherever the user meets it.
+ALREADY_RUNNING_MESSAGE = "A refresh is already running."
+
+
+@contextlib.contextmanager
+def _acquire_run_lock() -> Generator[None]:
+    """Hold the relay's refresh mutex for the duration of one run.
+
+    LOCKSTEP INVARIANT — one refresh run at a time per relay, whatever the
+    requested scope, and a refused request is always visible.
+
+    The CLI is the one relay where concurrency is between *processes*, so no
+    in-memory flag can see it: the browser guards with a ref in its refresh
+    hook, macOS with ``AppState.isRefreshing``, and neither has an equivalent
+    here. An advisory ``flock`` is the process-scoped equivalent.
+
+    Correctness rests on the kernel releasing the lock when the descriptor
+    closes, which covers a normal exit, a traceback, and a hard kill alike.
+    That is the whole reason not to use a pid file: a pid file outlives the
+    process that wrote it, so it needs staleness rules, and those rules are
+    where pid files go wrong. Nothing here has to reason about a stale lock.
+
+    The file itself is created once and never unlinked — removing it would race
+    a process that already holds the descriptor, and an empty file costs
+    nothing.
+    """
+    path = config.config_path().parent / "refresh.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            raise RefreshAlreadyRunning(ALREADY_RUNNING_MESSAGE) from exc
+        yield
+    finally:
+        os.close(fd)
 
 
 # Wall-clock budget for one whole run, checked only at seams where nothing is
@@ -595,6 +650,29 @@ def _process_entry(
 
 
 def run(
+    cfg: config.Config,
+    api_key: str,
+    service: str | None,
+    password: str,
+    *,
+    run_lock: Callable[[], AbstractContextManager[None]] = _acquire_run_lock,
+    **kwargs: Any,
+) -> RefreshResult:
+    """Run one refresh, holding the relay's refresh mutex for its whole length.
+
+    Split from ``_run`` so the lock wraps everything a run does — including the
+    vault fetch and create-run, which is where a second process would otherwise
+    do its damage — without indenting the body under a ``with``.
+
+    ``run_lock`` is injected for the same reason ``now`` and the clients are:
+    tests drive concurrency deliberately, and must not contend for a lock in the
+    developer's real config directory.
+    """
+    with run_lock():
+        return _run(cfg, api_key, service, password, **kwargs)
+
+
+def _run(
     cfg: config.Config,
     api_key: str,
     service: str | None,
