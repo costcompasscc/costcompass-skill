@@ -47,14 +47,26 @@ src/costcompass/
 tests/           pytest; HTTP mocked via injected httpx.MockTransport (no live stack)
 ```
 
-**`requirements.txt` and `VERSION` are generated — never hand-edit them.** They
-are derived from `pyproject.toml` + `uv.lock`; `bin/costcompass` needs a flat
-hash-pinned list because there is no uv and no lock resolution at install time.
+**`requirements.txt`, `VERSION` and `src/costcompass/githash.py` are generated —
+never hand-edit them.** The first two derive from `pyproject.toml` + `uv.lock`;
+`bin/costcompass` needs a flat hash-pinned list because there is no uv and no
+lock resolution at install time.
 
 ```bash
 scripts/gen-build-files.sh          # regenerate
 scripts/gen-build-files.sh --check  # fails if stale; runs in ./run-tests.sh
 ```
+
+`githash.py` carries the commit `costcompass --version` reports. It is a stamped
+file because the sha cannot be recovered at runtime: the plugin installs by
+copying this repo into a versioned cache holding no `.git`, and the CLI then
+installs into a venv, so the imported package cannot reach a checkout either.
+`--check` deliberately does **not** compare it against `HEAD` — a file recording
+HEAD cannot live inside the commit HEAD names, so that equality is false the
+moment the commit lands. It checks shape only; accuracy comes from `release.sh`
+regenerating on a clean tree immediately before committing. Consequence worth
+knowing: in a working checkout the sha names the last `gen-build-files.sh` run,
+not your uncommitted edits.
 
 ## Releasing
 

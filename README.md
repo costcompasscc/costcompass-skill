@@ -155,6 +155,7 @@ costcompass mtd claude           # MTD for one service
 costcompass mtd claude details   # that service's totals + per-model breakout
 costcompass mtd breakdown        # every card (providers + subscriptions) ranked, reconciling to the total
 costcompass mtd higgsfield       # a standalone subscription, addressed by name
+costcompass --version            # version + the commit this build was made from
 ```
 
 Service names resolve dynamically against the server (`claude` →
@@ -247,14 +248,20 @@ rather than a vendored duplicate that drifts.
 ./run-tests.sh    # pytest + the generated-file staleness check
 ```
 
-**`requirements.txt` and `VERSION` are generated — never hand-edit them.** They
-derive from `pyproject.toml` + `uv.lock`, because `bin/costcompass` installs
-with `--require-hashes` and has no lockfile resolver at install time:
+**`requirements.txt`, `VERSION` and `src/costcompass/githash.py` are generated —
+never hand-edit them.** The first two derive from `pyproject.toml` + `uv.lock`,
+because `bin/costcompass` installs with `--require-hashes` and has no lockfile
+resolver at install time:
 
 ```bash
 scripts/gen-build-files.sh          # regenerate
 scripts/gen-build-files.sh --check  # fail if stale (runs in ./run-tests.sh)
 ```
+
+`githash.py` holds the commit that `costcompass --version` reports, stamped at
+generation time because a shipped copy has no `.git` to read it from. `--check`
+verifies its shape rather than comparing it to `HEAD`: a file recording HEAD
+cannot live inside the commit HEAD names.
 
 Releasing is one command. This repo is its own marketplace, so pushing to
 `main` publishes — but an already-installed plugin only updates when

@@ -17,9 +17,15 @@ if ! command -v uv >/dev/null 2>&1; then
     exit 2
 fi
 
-uv run --quiet pytest -q
-
-# requirements.txt and VERSION are derived from pyproject.toml/uv.lock. This is
-# what keeps a dependency bump from shipping a plugin whose pinned install list
-# no longer matches the code it was tested against.
+# requirements.txt, VERSION and githash.py are derived from pyproject.toml/uv.lock
+# and the current commit. This is what keeps a dependency bump from shipping a
+# plugin whose pinned install list no longer matches the code it was tested
+# against.
+#
+# It runs before pytest rather than after so that a missing generated file is
+# reported as what it is. `import costcompass` reads githash.py, so a tree
+# without it fails collection with a ModuleNotFoundError that says nothing about
+# how to fix it — while this check names the file and prints the command.
 scripts/gen-build-files.sh --check
+
+uv run --quiet pytest -q

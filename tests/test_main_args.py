@@ -5,10 +5,58 @@ import json
 import pytest
 from typer.testing import CliRunner
 
+import costcompass
 from costcompass import config, main
 from costcompass.refresh import orchestrator
 
 runner = CliRunner()
+
+
+# --- version ---------------------------------------------------------------
+
+
+def test_version_flag_reports_distribution_and_build():
+    result = runner.invoke(main.app, ["--version"])
+    assert result.exit_code == 0
+    line = result.stdout.strip()
+    assert line.startswith("costcompass-cli ")
+    assert costcompass.package_version() in line
+
+
+def test_version_command_matches_flag():
+    """The subcommand is a second door onto one string, not a second string."""
+    flag = runner.invoke(main.app, ["--version"]).stdout.strip()
+    command = runner.invoke(main.app, ["version"])
+    assert command.exit_code == 0
+    assert command.stdout.strip() == flag
+
+
+def test_version_short_flag():
+    assert (
+        runner.invoke(main.app, ["-V"]).stdout.strip()
+        == runner.invoke(main.app, ["--version"]).stdout.strip()
+    )
+
+
+def test_bare_invocation_shows_help_and_succeeds():
+    """A root callback is what makes --version possible, and pairing one with
+    Typer's no_args_is_help turns a bare `costcompass` into exit 2. Callers read
+    that status, so the help-with-exit-0 behaviour is pinned here."""
+    result = runner.invoke(main.app, [])
+    assert result.exit_code == 0
+    assert "Usage" in result.stdout
+
+
+def test_build_id_includes_git_sha(monkeypatch):
+    monkeypatch.setattr(costcompass, "GIT_SHA", "abc123def456")
+    assert costcompass.build_id().endswith(" (git abc123def456)")
+
+
+def test_build_id_omits_empty_git_sha(monkeypatch):
+    """A build generated outside a git tree prints no hollow suffix."""
+    monkeypatch.setattr(costcompass, "GIT_SHA", "")
+    assert costcompass.build_id() == costcompass.package_version()
+    assert "git" not in costcompass.user_agent()
 
 
 # --- pure arg interpretation ---------------------------------------------

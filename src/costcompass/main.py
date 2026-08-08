@@ -9,7 +9,7 @@ from typing import Any, Optional
 
 import typer
 
-from . import api, config, render, secrets, services
+from . import DISTRIBUTION, api, build_id, config, render, secrets, services
 from . import vault as vault_mod
 from .refresh import orchestrator
 
@@ -17,13 +17,46 @@ REFRESH = "refresh"
 DETAILS = "details"
 BREAKDOWN = "breakdown"
 
+# `no_args_is_help` is deliberately absent: it is incompatible with the root
+# callback that carries --version. Click treats a group that has a callback and
+# no subcommand as a usage error, so the pair turns a bare `costcompass` into
+# exit 2 — help on stdout either way, but a failure to anything reading the
+# status. `root` below reproduces the same behaviour with exit 0.
 app = typer.Typer(
     help="CostCompass — month-to-date spend from your terminal.",
-    no_args_is_help=True,
     add_completion=False,
 )
 auth_app = typer.Typer(help="Manage the stored API key and server URL.")
 app.add_typer(auth_app, name="auth")
+
+
+def _version_line() -> str:
+    return f"{DISTRIBUTION} {build_id()}"
+
+
+def _print_version(value: bool) -> None:
+    """Eager --version callback: print and exit before any command runs."""
+    if value:
+        typer.echo(_version_line())
+        raise typer.Exit()
+
+
+@app.callback(invoke_without_command=True)
+def root(
+    ctx: typer.Context,
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-V",
+        callback=_print_version,
+        is_eager=True,
+        help="Show the version and the commit it was built from, then exit.",
+    ),
+) -> None:
+    """CostCompass — month-to-date spend from your terminal."""
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
 
 
 @dataclass
@@ -441,6 +474,12 @@ def auth_status(
         typer.echo("Vault password: not configured")
 
     raise typer.Exit(0 if report["ready"]["spend"] else 1)
+
+
+@app.command()
+def version() -> None:
+    """Show the version and the commit this build was made from."""
+    typer.echo(_version_line())
 
 
 def main() -> None:

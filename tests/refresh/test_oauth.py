@@ -6,6 +6,7 @@ import os
 import httpx
 import pytest
 
+import costcompass
 from costcompass import api, vault
 from costcompass.refresh import oauth
 
@@ -47,6 +48,7 @@ def test_mint_sends_bearer_and_body():
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen["auth"] = request.headers.get("Authorization")
+        seen["ua"] = request.headers.get("User-Agent")
         seen["path"] = request.url.path
         seen["body"] = json.loads(request.content)
         return httpx.Response(
@@ -61,6 +63,7 @@ def test_mint_sends_bearer_and_body():
     out = client.mint("/google/mint", "rt-old")
     assert out["access_token"] == "at-1"
     assert seen["auth"] == "Bearer sk-cli"
+    assert seen["ua"] == costcompass.user_agent()
     assert seen["path"] == "/oauth/v1/google/mint"
     assert seen["body"] == {"refresh_token": "rt-old"}
 

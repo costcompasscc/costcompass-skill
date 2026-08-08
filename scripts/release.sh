@@ -34,6 +34,7 @@ TOUCHED=(
     VERSION
     requirements.txt
     .claude-plugin/plugin.json
+    src/costcompass/githash.py
 )
 
 # ---------------------------------------------------------------- arguments
@@ -119,8 +120,21 @@ trap 'rollback_hint' ERR
 echo "release: relocking…"
 uv lock --quiet
 
-# Derives VERSION, requirements.txt, and plugin.json's version from the above.
+# Derives VERSION, requirements.txt, plugin.json's version, and githash.py from
+# the above.
 scripts/gen-build-files.sh
+
+# githash.py is what `costcompass --version` reports, and it is the one generated
+# file --check cannot verify by regenerating: a file recording HEAD cannot live
+# in the commit HEAD names, so equality is unsatisfiable once the commit lands.
+# Here, though — after regeneration and before the release commit — equality is
+# exactly what must hold, and this is the only moment it can be asserted. A
+# published build whose sha names some other commit is worse than one with no
+# sha at all: it answers "which build is this?" confidently and wrongly.
+STAMPED="$(sed -n 's/^GIT_SHA = "\(.*\)"$/\1/p' src/costcompass/githash.py)"
+EXPECTED="$(git rev-parse --short=12 HEAD)"
+[[ "$STAMPED" == "$EXPECTED" ]] \
+    || die "githash.py stamped '$STAMPED' but HEAD is '$EXPECTED' — regeneration did not take"
 
 echo "release: running tests…"
 ./run-tests.sh

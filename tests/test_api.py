@@ -3,7 +3,21 @@ from __future__ import annotations
 import httpx
 import pytest
 
+import costcompass
 from costcompass import api
+
+
+def test_user_agent_identifies_the_cli_build(make_api):
+    """Vault access logs name the relay and its build, not `python-httpx`."""
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["ua"] = request.headers.get("User-Agent")
+        return httpx.Response(200, json={"mtd_usd": 0.0})
+
+    make_api(handler).summary()
+    assert seen["ua"] == costcompass.user_agent()
+    assert seen["ua"].startswith("costcompass-cli/")
 
 
 def test_bearer_header_and_summary(make_api):

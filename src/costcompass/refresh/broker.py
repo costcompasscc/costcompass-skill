@@ -31,6 +31,8 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from .. import user_agent
+
 FORWARD_CAP = 100
 
 # Bounded retry on transient failures, mirroring the browser orchestrator's
@@ -256,9 +258,15 @@ class BrokerClient:
     ) -> None:
         self.broker_url = broker_url.rstrip("/")
         self._http = http or httpx.Client(timeout=120.0)
+        # These are the headers of the CLI's own request to the broker, which is
+        # the only hop the relay's identity belongs on. The forwarded request's
+        # headers are built separately (``build_forward_request``) and the
+        # broker rejects a caller-supplied user-agent there, setting its own for
+        # the provider hop.
         self._headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
+            "User-Agent": user_agent(),
         }
         self._forward_cap = forward_cap
         self._entry_count: dict[str, int] = {}

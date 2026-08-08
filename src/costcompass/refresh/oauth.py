@@ -35,7 +35,7 @@ from typing import Any
 
 import httpx
 
-from .. import api
+from .. import api, user_agent
 from .. import vault as vault_mod
 
 # Total write-back attempts (the first try plus retries) before a rotated
@@ -171,6 +171,7 @@ class OAuthBrokerClient:
         self._headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
+            "User-Agent": user_agent(),
         }
 
     def mint(self, path: str, refresh_token: str) -> dict[str, Any]:

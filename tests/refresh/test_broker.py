@@ -6,6 +6,7 @@ import json
 import httpx
 import pytest
 
+import costcompass
 from costcompass.refresh import broker
 
 
@@ -109,6 +110,26 @@ def test_forward_success_relays_signature():
     assert resp["signature"] == "deadbeef"
     assert resp["body"] == "Yg=="
     assert seen["auth"] == "Bearer sk-cli"
+
+
+def test_forward_sends_cli_user_agent_only_on_its_own_request():
+    """The relay identifies itself to the broker; the forwarded request must
+    not carry a user-agent, which the broker rejects and sets itself."""
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["ua"] = request.headers.get("User-Agent")
+        seen["forwarded"] = json.loads(request.content)["headers"]
+        return httpx.Response(
+            200,
+            json={"status": 200, "headers": {}, "body": "Yg==", "signature": "s"},
+        )
+
+    make_broker(handler).forward(
+        {"target": {}, "headers": {"Accept": "json"}, "signing_token": "t"}
+    )
+    assert seen["ua"] == costcompass.user_agent()
+    assert not any(k.lower() == "user-agent" for k in seen["forwarded"])
 
 
 def test_forward_cap_trips_after_n():

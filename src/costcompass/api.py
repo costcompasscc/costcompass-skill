@@ -10,6 +10,8 @@ from typing import Any
 
 import httpx
 
+from . import user_agent
+
 
 class ApiError(Exception):
     """User-facing API failure (auth, connectivity, or a 4xx/5xx body).
@@ -53,6 +55,7 @@ class Client:
         self._headers = {
             "Authorization": f"Bearer {api_key}",
             "Accept": "application/json",
+            "User-Agent": user_agent(),
         }
 
     def __enter__(self) -> "Client":
