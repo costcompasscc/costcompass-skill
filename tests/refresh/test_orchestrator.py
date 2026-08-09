@@ -1369,7 +1369,21 @@ def test_flat_broker_error_classified_not_502():
     }
     out = orchestrator._run_flat(plan, {"x": "k"}, "tok", brk)
     assert out[0]["status"] == 429  # what the broker answered, not a generic 502
-    assert "synthetic" not in out[0]
+    # Flagged synthetic and carrying the REAL request URL, matching the browser.
+    # The flag makes the App Server strip the stub before plugin.process(), so
+    # sibling responses in a fan-out still ingest instead of one dead
+    # sub-request discarding the whole entry; the real URL is what lets the
+    # server attribute the gap to the request that failed (for a per-day plan,
+    # which day). A cc-internal:// sentinel matches no planned request and the
+    # missing segment becomes untraceable.
+    assert out[0]["synthetic"] is True
+    assert out[0]["request_url"] == "https://h/p"
+    assert out[0]["request_purpose"] == "u"
+    # No synthetic_reason: those short-circuit the server to a specific terminal
+    # state (skipped / forward_cap_exceeded). A broker failure takes the
+    # ordinary path, where the server records the window as incomplete.
+    assert "synthetic_reason" not in out[0]
+    assert base64.b64decode(out[0]["body_b64"]).decode() == "rate_limited: slow"
 
 
 def test_flat_broker_error_relays_a_4xx_the_old_map_collapsed():

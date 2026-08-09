@@ -21,8 +21,8 @@ from pathlib import Path
 import pytest
 
 from costcompass import vault
+from costcompass.refresh import orchestrator, signers
 from costcompass.refresh import program as program_mod
-from costcompass.refresh import signers
 from costcompass.refresh.broker import BrokerError
 
 _CORPUS = Path(__file__).parent / "vectors" / "relay"
@@ -144,11 +144,22 @@ def _norm_request(req: dict) -> dict:
 
 
 def _norm_response(resp: dict) -> dict:
+    # ``synthetic`` is compared on BOTH branches: the flag decides whether the
+    # App Server strips a response before plugin.process(), i.e. whether a
+    # failed sub-request discards its successful siblings. The corpus used to
+    # drop it, which is how this port's flat path diverged from the reference
+    # unnoticed.
+    synthetic = resp.get("synthetic") is True
     # A provider-error carries a per-impl sentinel host; pin status + decoded
     # error only (the sentinel URL and the raw body-JSON spacing are per-impl).
     if resp["request_url"].startswith("cc-internal://"):
         parsed = json.loads(base64.b64decode(resp["body_b64"]))
-        return {"kind": "provider_error", "status": resp["status"], "error": parsed["error"]}
+        return {
+            "kind": "provider_error",
+            "status": resp["status"],
+            "error": parsed["error"],
+            "synthetic": synthetic,
+        }
     return {
         "kind": "relayed",
         "status": resp["status"],
@@ -157,6 +168,7 @@ def _norm_response(resp: dict) -> dict:
         "body_b64": resp["body_b64"],
         "signature": resp.get("signature"),
         "headers": resp["headers"],
+        "synthetic": synthetic,
     }
 
 
@@ -191,3 +203,24 @@ def test_program_vector(vec: dict) -> None:
         "responses": [_norm_response(r) for r in out],
     }
     assert got == vec["expect"]
+
+
+# --- Flat-path broker failure -----------------------------------------------
+# The pure (request, BrokerError) -> submitted-payload mapping. Pinned as a
+# transform rather than through _run_flat because the three relays' flat
+# runners legitimately differ (retry lives in this port's broker client but in
+# the browser's orchestrator; this port runs sequentially where the browser
+# fans out) — the payload SHAPE is the part that must agree, and it is the part
+# that drifted.
+
+_BROKER_FAILURE = _load("broker-failure.json")
+
+
+@pytest.mark.parametrize("vec", _BROKER_FAILURE, ids=_ids(_BROKER_FAILURE))
+def test_broker_failure_vector(vec: dict) -> None:
+    e = vec["error"]
+    err = BrokerError(
+        e["code"], e["http_status"], e["message"], None, e.get("request_id")
+    )
+    got = orchestrator._synthetic_broker_failure(vec["request"], err)
+    assert _norm_response(got) == vec["expect"]

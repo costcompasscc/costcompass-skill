@@ -90,3 +90,27 @@ def test_format_breakdown_neutralizes_malicious_card_name():
     out = render.format_breakdown(cards)
     assert "\x1b" not in out
     assert "Acme" in out
+
+
+def test_mtd_total_discloses_an_incomplete_window():
+    """A bare figure reads as settled. When the server knows part of the month
+    never arrived, the number is a floor and must say so."""
+    out = render.format_amount({"mtd_usd": 12.5, "incomplete_card_count": 1})
+    assert out.startswith("$12.50\n")
+    assert "hasn't finished loading" in out
+    assert "may be low" in out
+
+
+def test_mtd_total_stays_bare_when_every_window_is_whole():
+    assert render.format_amount({"mtd_usd": 12.5, "incomplete_card_count": 0}) == "$12.50"
+    # An older server omits the field entirely — no caveat, unchanged output.
+    assert render.format_amount({"mtd_usd": 12.5}) == "$12.50"
+
+
+def test_incomplete_note_agrees_in_number():
+    assert "1 service hasn't" in (
+        render.incomplete_window_note({"incomplete_card_count": 1}) or ""
+    )
+    assert "3 services haven't" in (
+        render.incomplete_window_note({"incomplete_card_count": 3}) or ""
+    )

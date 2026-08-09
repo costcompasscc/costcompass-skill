@@ -42,9 +42,36 @@ def money(value: float) -> str:
     return f"${value:,.2f}"
 
 
+def incomplete_window_note(summary: dict[str, Any]) -> str | None:
+    """Caveat for a total that is a floor rather than a final figure, or None.
+
+    A card can fetch successfully and still miss part of the month — one
+    sub-request fails at the broker while its siblings ingest. The server counts
+    those cards per scope; without this the CLI would print an under-reported
+    number as if it were settled.
+
+    Deliberately no count of missing days: the server's per-card verdict is
+    exact, but a day whose response never arrived leaves no record at all, so
+    any day count would be a lower bound printed as a fact. It also has to read
+    sensibly for providers with no per-day notion at all.
+    """
+    count = summary.get("incomplete_card_count") or 0
+    if count <= 0:
+        return None
+    subject = "1 service hasn't" if count == 1 else f"{count} services haven't"
+    return f"({subject} finished loading this month's data yet — this total may be low)"
+
+
 def format_amount(summary: dict[str, Any]) -> str:
-    """The headline 'big number' for the portfolio or one service."""
-    return money(summary.get("mtd_usd", 0.0))
+    """The headline 'big number' for the portfolio or one service.
+
+    Carries the incomplete-window caveat on a second line when there is one:
+    this is the whole output of ``costcompass mtd``, so a figure printed bare
+    reads as settled even when the server knows part of the month is missing.
+    """
+    amount = money(summary.get("mtd_usd", 0.0))
+    note = incomplete_window_note(summary)
+    return f"{amount}\n{note}" if note else amount
 
 
 def format_subscription(display_name: str, cost: float) -> str:
@@ -106,6 +133,9 @@ def format_details(
     ]
     if summary.get("mtd_as_of"):
         lines.append(f"  data as of       : {safe_text(summary['mtd_as_of'])}")
+    note = incomplete_window_note(summary)
+    if note:
+        lines.append(f"  {note}")
 
     if not models:
         lines.append("")

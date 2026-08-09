@@ -142,7 +142,8 @@
             "signature": "s",
             "headers": {
               "content-type": "application/json"
-            }
+            },
+            "synthetic": false
           },
           {
             "kind": "relayed",
@@ -153,7 +154,8 @@
             "signature": "s",
             "headers": {
               "content-type": "application/json"
-            }
+            },
+            "synthetic": false
           },
           {
             "kind": "relayed",
@@ -164,7 +166,8 @@
             "signature": "s",
             "headers": {
               "content-type": "application/json"
-            }
+            },
+            "synthetic": false
           }
         ]
       }
@@ -266,7 +269,8 @@
             "signature": "s",
             "headers": {
               "content-type": "application/json"
-            }
+            },
+            "synthetic": false
           }
         ]
       }
@@ -368,12 +372,14 @@
             "signature": "s",
             "headers": {
               "content-type": "application/json"
-            }
+            },
+            "synthetic": false
           },
           {
             "kind": "provider_error",
             "status": 502,
-            "error": "substituted path value outside allowed charset"
+            "error": "substituted path value outside allowed charset",
+            "synthetic": false
           }
         ]
       }
@@ -479,12 +485,14 @@
             "signature": "s",
             "headers": {
               "content-type": "application/json"
-            }
+            },
+            "synthetic": false
           },
           {
             "kind": "provider_error",
             "status": 504,
-            "error": "poll deadline exceeded"
+            "error": "poll deadline exceeded",
+            "synthetic": false
           }
         ]
       }
@@ -578,7 +586,8 @@
           {
             "kind": "provider_error",
             "status": 502,
-            "error": "upstream_unreachable: broker down"
+            "error": "upstream_unreachable: broker down",
+            "synthetic": false
           }
         ]
       }
@@ -743,7 +752,8 @@
             "signature": "s",
             "headers": {
               "content-type": "application/json"
-            }
+            },
+            "synthetic": false
           },
           {
             "kind": "relayed",
@@ -754,7 +764,8 @@
             "signature": "s",
             "headers": {
               "content-type": "application/json"
-            }
+            },
+            "synthetic": false
           }
         ]
       }

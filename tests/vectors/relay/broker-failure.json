@@ -1,0 +1,166 @@
+{
+  "_comment": "Flat-path broker-failure mapping: (request, BrokerError) -> the RawResponsePayload the relay submits for a sub-request whose forward failed. Reference: brokerFailureToResponse in frontend/src/lib/refresh/orchestrator.ts. Ports: _synthetic_broker_failure (CLI orchestrator.py), BrokerClient.syntheticBrokerFailure (macOS). AUTHORED input, GENERATED expect - run `make gen-vectors` after changing the reference.",
+  "vectors": [
+    {
+      "name": "observed 4xx wins over the code-derived guess",
+      "request": {
+        "url": "https://api.example.com/usage?day=17",
+        "purpose": "usage"
+      },
+      "error": {
+        "code": "invalid_request",
+        "http_status": 400,
+        "message": "bad forward",
+        "request_id": null
+      },
+      "expect": {
+        "kind": "relayed",
+        "status": 400,
+        "request_url": "https://api.example.com/usage?day=17",
+        "request_purpose": "usage",
+        "body_b64": "aW52YWxpZF9yZXF1ZXN0OiBiYWQgZm9yd2FyZA==",
+        "signature": null,
+        "headers": {},
+        "synthetic": true
+      }
+    },
+    {
+      "name": "rate limit keeps its 429 and its request id",
+      "request": {
+        "url": "https://api.example.com/usage?day=03",
+        "purpose": "usage"
+      },
+      "error": {
+        "code": "rate_limited",
+        "http_status": 429,
+        "message": "slow down",
+        "request_id": "req-abc123"
+      },
+      "expect": {
+        "kind": "relayed",
+        "status": 429,
+        "request_url": "https://api.example.com/usage?day=03",
+        "request_purpose": "usage",
+        "body_b64": "cmF0ZV9saW1pdGVkOnJlcS1hYmMxMjM6IHNsb3cgZG93bg==",
+        "signature": null,
+        "headers": {},
+        "synthetic": true
+      }
+    },
+    {
+      "name": "client-synthesized timeout has no transport status to read",
+      "request": {
+        "url": "https://api.example.com/usage",
+        "purpose": "usage"
+      },
+      "error": {
+        "code": "upstream_timeout",
+        "http_status": 0,
+        "message": "timed out",
+        "request_id": null
+      },
+      "expect": {
+        "kind": "relayed",
+        "status": 504,
+        "request_url": "https://api.example.com/usage",
+        "request_purpose": "usage",
+        "body_b64": "dXBzdHJlYW1fdGltZW91dDogdGltZWQgb3V0",
+        "signature": null,
+        "headers": {},
+        "synthetic": true
+      }
+    },
+    {
+      "name": "client-synthesized network error falls back to 502",
+      "request": {
+        "url": "https://api.example.com/balance",
+        "purpose": "balance"
+      },
+      "error": {
+        "code": "network_error",
+        "http_status": 0,
+        "message": "connection refused",
+        "request_id": null
+      },
+      "expect": {
+        "kind": "relayed",
+        "status": 502,
+        "request_url": "https://api.example.com/balance",
+        "request_purpose": "balance",
+        "body_b64": "bmV0d29ya19lcnJvcjogY29ubmVjdGlvbiByZWZ1c2Vk",
+        "signature": null,
+        "headers": {},
+        "synthetic": true
+      }
+    },
+    {
+      "name": "an unmapped client-synthesized code falls back to 500, not 502",
+      "request": {
+        "url": "https://api.example.com/usage",
+        "purpose": "usage"
+      },
+      "error": {
+        "code": "malformed_response",
+        "http_status": 0,
+        "message": "non-JSON envelope",
+        "request_id": null
+      },
+      "expect": {
+        "kind": "relayed",
+        "status": 500,
+        "request_url": "https://api.example.com/usage",
+        "request_purpose": "usage",
+        "body_b64": "bWFsZm9ybWVkX3Jlc3BvbnNlOiBub24tSlNPTiBlbnZlbG9wZQ==",
+        "signature": null,
+        "headers": {},
+        "synthetic": true
+      }
+    },
+    {
+      "name": "auth failure keeps its 401 so the card asks for a reconnect",
+      "request": {
+        "url": "https://api.example.com/usage",
+        "purpose": "usage"
+      },
+      "error": {
+        "code": "unauthenticated",
+        "http_status": 401,
+        "message": "bad key",
+        "request_id": "req-zz9"
+      },
+      "expect": {
+        "kind": "relayed",
+        "status": 401,
+        "request_url": "https://api.example.com/usage",
+        "request_purpose": "usage",
+        "body_b64": "dW5hdXRoZW50aWNhdGVkOnJlcS16ejk6IGJhZCBrZXk=",
+        "signature": null,
+        "headers": {},
+        "synthetic": true
+      }
+    },
+    {
+      "name": "an empty purpose still pairs with its real url",
+      "request": {
+        "url": "https://api.example.com/p",
+        "purpose": ""
+      },
+      "error": {
+        "code": "upstream_unreachable",
+        "http_status": 502,
+        "message": "no route",
+        "request_id": null
+      },
+      "expect": {
+        "kind": "relayed",
+        "status": 502,
+        "request_url": "https://api.example.com/p",
+        "request_purpose": "",
+        "body_b64": "dXBzdHJlYW1fdW5yZWFjaGFibGU6IG5vIHJvdXRl",
+        "signature": null,
+        "headers": {},
+        "synthetic": true
+      }
+    }
+  ]
+}

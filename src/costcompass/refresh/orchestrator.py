@@ -405,6 +405,39 @@ def _synthetic_cap(url: str, purpose: str) -> dict[str, Any]:
     }
 
 
+def _synthetic_broker_failure(req: dict[str, Any], err: BrokerError) -> dict[str, Any]:
+    """Synthetic stub for a flat sub-request whose broker forward failed
+    (mirrors the browser's ``brokerFailureToResponse``).
+
+    Two properties of this shape are load-bearing, and both are why it is a
+    synthetic stub rather than the unsigned provider-error this path used to
+    emit:
+
+    - **Flagged synthetic**, so the App Server strips it before
+      ``plugin.process()``. The siblings that DID come back still ingest, and
+      one dead sub-request no longer discards a whole month of fetched usage.
+      The entry is not silently reported whole either — the server records the
+      window as incomplete and shortens the card's debounce so the gap gets
+      another chance on the next refresh.
+    - **The real request URL**, not a ``cc-internal://`` sentinel. For a per-day
+      fan-out that URL is how the server knows WHICH day is missing; a sentinel
+      matches no planned request and the gap becomes unattributable.
+
+    The body is a short, secret-free explanation carried verbatim into the
+    card's error text, so the format matches the browser's byte for byte —
+    the shared relay vectors compare it.
+    """
+    explain = f"{err.code}{f':{err.request_id}' if err.request_id else ''}: {err}"
+    return {
+        "request_url": req.get("url", ""),
+        "request_purpose": req.get("purpose", ""),
+        "status": relay_status(err),
+        "headers": {},
+        "body_b64": base64.b64encode(explain.encode()).decode("ascii"),
+        "synthetic": True,
+    }
+
+
 def _entry_purpose(plan: dict[str, Any]) -> str:
     """Generic relay purpose for a synthetic/error response: the program's
     purpose, else the first request's, mirroring the browser. The purpose is
@@ -531,17 +564,11 @@ def _run_flat(
             out.append(_synthetic_cap(req.get("url", ""), req.get("purpose", "")))
             return out
         except BrokerError as err:
-            # Relay a provider-error with the status the broker reported (so
-            # the App Server classifies a rate-limit/timeout correctly rather
-            # than as a generic 502) and continue — one failed sub-request must
-            # not poison the others.
-            out.append(
-                provider_error_response(
-                    relay_status(err),
-                    req.get("purpose", ""),
-                    f"{err.code}: {err}",
-                )
-            )
+            # Continue: one failed sub-request must not poison the others, and
+            # the synthetic stub is what makes that true rather than aspirational
+            # — the server strips it, ingests the siblings, and records the
+            # window as incomplete so the gap is reported and retried.
+            out.append(_synthetic_broker_failure(req, err))
             continue
         out.append(to_raw_response_payload(req, resp))
     return out

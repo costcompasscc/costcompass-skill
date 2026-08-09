@@ -169,11 +169,17 @@ class BrokerError(Exception):
         http_status: int,
         message: str,
         retry_after_s: float | None = None,
+        request_id: str | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.http_status = http_status
         self.retry_after_s = retry_after_s
+        # The broker's own correlation id for this forward, when it sent one.
+        # Relayed into the failure stub's body so a user-visible error can be
+        # matched to the broker log line that produced it — the browser has
+        # carried this since the stub was introduced.
+        self.request_id = request_id
 
     def is_transient(self) -> bool:
         return self.code in _TRANSIENT
@@ -404,4 +410,11 @@ class BrokerClient:
         )
         message = err.get("message") or f"broker {resp.status_code}"
         retry_after = parse_retry_after(resp.headers.get("retry-after"))
-        return BrokerError(code, resp.status_code, message, retry_after)
+        request_id = err.get("request_id")
+        return BrokerError(
+            code,
+            resp.status_code,
+            message,
+            retry_after,
+            request_id if isinstance(request_id, str) else None,
+        )
