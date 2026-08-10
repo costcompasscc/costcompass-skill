@@ -46,6 +46,11 @@ class _Clock:
 
 
 def _entry(provider: str, purposes: list[str]) -> dict:
+    # Every request gets a DISTINCT url, keyed on its purpose. A fan-out plan's
+    # requests differ by URL in real life (one per day), and the deadline stubs
+    # are only attributable to a specific day because each carries its own
+    # request's URL — a fixture that reused one URL could not tell that apart
+    # from every stub copying the first request's.
     return {
         "provider_id": provider,
         "instance_key": "",
@@ -54,7 +59,7 @@ def _entry(provider: str, purposes: list[str]) -> dict:
         "plan": {
             "requests": [
                 {
-                    "url": f"https://api.{provider}.test/usage",
+                    "url": f"https://api.{provider}.test/{purpose}",
                     "method": "GET",
                     "headers": {},
                     "body": None,
@@ -185,9 +190,15 @@ def test_entry_pool_stops_and_finalizes_cancelled():
     assert h.finalize_bodies == [{"cancelled": True}]
 
 
-def test_request_loop_appends_a_504_stub():
-    """Budget spent inside one plan: the partial set carries a 504 provider
-    error so the App Server cannot read it as a clean success."""
+def test_request_loop_banks_siblings_and_stubs_the_tail():
+    """Budget spent inside one plan: the requests it cut off become synthetic
+    stubs, and the response that DID arrive is still submitted.
+
+    A non-synthetic stub would reach ``plugin.process()``, whose contract makes
+    it raise on a 5xx — taking the fetched sibling down with it. Honesty about
+    the truncation comes from the server's window-completeness verdict instead,
+    which is what makes banking the sibling safe.
+    """
     h = _Harness(["deepseek"], purposes=["usage_1", "usage_2", "usage_3"])
     # Expire after request 1 returns, so request 2 is never issued.
     h.on_forward = lambda count: h.clock.advance(BUDGET_S * 2) if count == 1 else None
@@ -195,27 +206,61 @@ def test_request_loop_appends_a_504_stub():
     # The run RESOLVES rather than raising, and finalizes cancelled=False. That
     # is the intended split: the deadline landed inside the only entry, so every
     # entry was still attempted and none was left pending server-side.
-    # Truncation is an ENTRY-level failure; RefreshDeadlineExceeded is reserved
-    # for work never attempted, which is what the cancelling finalize cleans up.
+    # RefreshDeadlineExceeded is reserved for work never attempted, which is
+    # what the cancelling finalize cleans up.
     h.run(concurrency=1)
 
     assert h.forwards == 1
     responses = h.submitted[0]["responses"]
-    # One real relayed response plus the stub — NOT a short set.
-    assert len(responses) == 2
-    stub = responses[1]
-    assert stub["status"] == 504
-    # Carries the purpose of the request that never ran, so the server
-    # reconciles it against a purpose it actually planned.
-    assert stub["request_purpose"] == "usage_2"
-    # NOT synthetic: a synthetic stub is stripped before plugin.process() and
-    # the entry would close `success` with a silent under-count. Unsigned plus
-    # the cc-internal:// scheme is what carries it through the App Server's
-    # request-metadata reconciliation.
-    assert "synthetic" not in stub
-    assert "signature" not in stub
-    assert stub["request_url"].startswith("cc-internal://")
+    # The relayed response survives — the whole point — followed by one stub
+    # per abandoned request.
+    assert len(responses) == 3
+    assert responses[0]["request_purpose"] == "usage_1"
+    assert responses[0].get("synthetic") is not True
+
+    for stub, purpose in zip(responses[1:], ["usage_2", "usage_3"]):
+        assert stub["status"] == 504
+        # Synthetic, so the App Server strips it before plugin.process() and
+        # the sibling above still ingests.
+        assert stub["synthetic"] is True
+        # No reason marker: the server's marker short-circuits are for an
+        # entry whose SOLE response is synthetic, and would mislabel this one.
+        assert "synthetic_reason" not in stub
+        assert "signature" not in stub
+        # ITS OWN planned URL, not a cc-internal:// sentinel and not a sibling's
+        # — that is what tells the server which segment is missing so it can
+        # re-plan exactly that one.
+        assert stub["request_url"] == f"https://api.deepseek.test/{purpose}"
+        assert stub["request_purpose"] == purpose
+
     assert h.finalize_bodies == [{"cancelled": False}]
+
+
+def test_request_loop_stubs_every_abandoned_request():
+    """One stub per cut-off request, each with its own purpose — not a single
+    stub for the entry. A per-day fan-out needs every missing day named or the
+    next refresh cannot tell which ones to re-plan."""
+    purposes = [f"usage_{i}" for i in range(1, 6)]
+    h = _Harness(["deepseek"], purposes=purposes)
+    h.on_forward = lambda count: h.clock.advance(BUDGET_S * 2) if count == 2 else None
+
+    h.run(concurrency=1)
+
+    assert h.forwards == 2
+    responses = h.submitted[0]["responses"]
+    assert [r["request_purpose"] for r in responses] == purposes
+    # Each stub is built from ITS OWN abandoned request, so the urls track the
+    # purposes one-for-one rather than every stub repeating the cursor's.
+    assert [r["request_url"] for r in responses] == [
+        f"https://api.deepseek.test/{p}" for p in purposes
+    ]
+    assert [r.get("synthetic") is True for r in responses] == [
+        False,
+        False,
+        True,
+        True,
+        True,
+    ]
 
 
 def test_under_budget_is_untouched():

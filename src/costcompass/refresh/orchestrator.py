@@ -24,10 +24,10 @@ import os
 import sys
 import threading
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import Any, Callable, TypeVar
+from typing import Any, Self, TypeVar
 
 from .. import api, config, services
 from .. import vault as vault_mod
@@ -74,7 +74,7 @@ class _ProgressTicker:
         self._thread: threading.Thread | None = None
         self._ticked = False
 
-    def __enter__(self) -> "_ProgressTicker":
+    def __enter__(self) -> Self:
         if self._enabled:
             self._thread = threading.Thread(target=self._loop, daemon=True)
             self._thread.start()
@@ -405,13 +405,15 @@ def _synthetic_cap(url: str, purpose: str) -> dict[str, Any]:
     }
 
 
-def _synthetic_broker_failure(req: dict[str, Any], err: BrokerError) -> dict[str, Any]:
-    """Synthetic stub for a flat sub-request whose broker forward failed
-    (mirrors the browser's ``brokerFailureToResponse``).
+def _synthetic_for_request(
+    req: dict[str, Any], status: int, explain: str
+) -> dict[str, Any]:
+    """Synthetic stub standing in for one flat sub-request that produced no
+    upstream response.
 
-    Two properties of this shape are load-bearing, and both are why it is a
-    synthetic stub rather than the unsigned provider-error this path used to
-    emit:
+    Two properties of this shape are load-bearing, and both are why every flat
+    early exit uses it rather than the unsigned provider-error some of them
+    used to emit:
 
     - **Flagged synthetic**, so the App Server strips it before
       ``plugin.process()``. The siblings that DID come back still ingest, and
@@ -421,21 +423,43 @@ def _synthetic_broker_failure(req: dict[str, Any], err: BrokerError) -> dict[str
       another chance on the next refresh.
     - **The real request URL**, not a ``cc-internal://`` sentinel. For a per-day
       fan-out that URL is how the server knows WHICH day is missing; a sentinel
-      matches no planned request and the gap becomes unattributable.
+      matches no planned request and the gap becomes unattributable. It is also
+      what writes the day's ``failed`` state row, so the next refresh re-plans
+      exactly that day — a request that simply goes missing writes no row.
 
-    The body is a short, secret-free explanation carried verbatim into the
-    card's error text, so the format matches the browser's byte for byte —
-    the shared relay vectors compare it.
+    ``explain`` is carried verbatim into the card's error text and must stay
+    secret-free.
     """
-    explain = f"{err.code}{f':{err.request_id}' if err.request_id else ''}: {err}"
     return {
         "request_url": req.get("url", ""),
         "request_purpose": req.get("purpose", ""),
-        "status": relay_status(err),
+        "status": status,
         "headers": {},
         "body_b64": base64.b64encode(explain.encode()).decode("ascii"),
         "synthetic": True,
     }
+
+
+def _synthetic_broker_failure(req: dict[str, Any], err: BrokerError) -> dict[str, Any]:
+    """Synthetic stub for a flat sub-request whose broker forward failed
+    (mirrors the browser's ``brokerFailureToResponse``).
+
+    The body format matches the browser's byte for byte — the shared relay
+    vectors compare it, so this string is wire contract, not a log line.
+    """
+    explain = f"{err.code}{f':{err.request_id}' if err.request_id else ''}: {err}"
+    return _synthetic_for_request(req, relay_status(err), explain)
+
+
+def _synthetic_deadline(req: dict[str, Any]) -> dict[str, Any]:
+    """Synthetic stub for a flat sub-request the run budget left unissued.
+
+    No ``synthetic_reason``: the server's marker short-circuits fire only when
+    the synthetic is an entry's SOLE response, and a truncated fan-out submits
+    these alongside the siblings that did arrive. The generic strip-and-record
+    path is the one that should handle them.
+    """
+    return _synthetic_for_request(req, 504, "run deadline exceeded")
 
 
 def _entry_purpose(plan: dict[str, Any]) -> str:
@@ -531,30 +555,29 @@ def _run_flat(
     past_deadline: Callable[[], bool] | None = None,
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    for req in plan.get("requests", []):
+    requests = list(plan.get("requests", []))
+    for i, req in enumerate(requests):
         # The run budget's second seam. An entry may hold many requests, so
         # checking only between entries would honour the budget on paper while
         # one entry stayed wedged for hours. Checked before the request is
         # issued, never mid-flight.
         if past_deadline is not None and past_deadline():
-            # Append an unsigned, NON-synthetic provider error so the entry is
-            # classified failed by the App Server's status taxonomy. Without it
-            # the short response set reads as a clean success and silently
-            # under-counts spend — the one outcome worse than a failed card.
+            # Stop issuing, but bank what arrived: a synthetic stub per request
+            # the budget cut off, so the App Server strips them, ingests the
+            # siblings, and records the window as incomplete rather than
+            # discarding a nearly-whole month. One stub PER abandoned request,
+            # not one for the entry, because each carries its own URL — that is
+            # what makes the individual missing days attributable and re-planned
+            # on the next refresh.
             #
-            # Cost, accepted deliberately: the plugin contract requires
-            # process() to raise on a 5xx, and that raise discards THIS entry's
-            # already-fetched siblings in the same submit. A partial usage
-            # window ingested as if complete would under-count; the next
-            # refresh re-pulls the whole window anyway. Other entries submitted
-            # separately and are unaffected.
+            # This used to emit an unsigned NON-synthetic provider error, to
+            # stop a short response set reading as a clean success. The App
+            # Server records window completeness now, so the honesty that
+            # bought no longer costs the entry's fetched siblings — the same
+            # reasoning that moved the broker-failure branch below.
             #
-            # Mirrors the forward-cap early return below exactly.
-            out.append(
-                provider_error_response(
-                    504, req.get("purpose", ""), "run deadline exceeded"
-                )
-            )
+            # All three of this loop's early exits now bank siblings alike.
+            out.extend(_synthetic_deadline(r) for r in requests[i:])
             return out
         try:
             resp = broker.forward_with_retry(
