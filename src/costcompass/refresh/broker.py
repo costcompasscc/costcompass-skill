@@ -185,6 +185,28 @@ class BrokerError(Exception):
         return self.code in _TRANSIENT
 
 
+class BrokerRunDeadlineError(BrokerError):
+    """A retry was abandoned because its backoff did not fit the run budget.
+
+    Not a transport failure at all — the last attempt's error is beside the
+    point, which is why this carries none of it. The caller banks the request as
+    a synthetic deadline stub, the same one it emits for a request the budget
+    never let it issue; from the App Server's side those are one event.
+
+    A ``BrokerError`` subclass so a caller that only knows the base class still
+    handles it, but deliberately non-transient: retrying the thing that ran out
+    of time is the bug.
+    """
+
+    def __init__(self, wait_s: float) -> None:
+        super().__init__(
+            "run_deadline_exceeded",
+            504,
+            f"retry backoff of {wait_s:.0f}s would exceed the run budget",
+        )
+        self.wait_s = wait_s
+
+
 class BrokerForwardCapError(BrokerError):
     def __init__(self, cap: int, issued: int) -> None:
         super().__init__(
@@ -295,7 +317,37 @@ class BrokerClient:
             return max(retry_after_s, backoff)
         return backoff
 
-    def forward_with_retry(self, request: dict[str, Any]) -> dict[str, Any]:
+    def _sleep_within_budget(
+        self, seconds: float, can_wait: Callable[[float], bool] | None
+    ) -> None:
+        """Sleep between two attempts, unless the caller's budget can't cover it.
+
+        The predicate is asked TWICE around one sleep, and both calls carry
+        weight:
+
+        - Before, because a wait ending at or past the deadline buys an attempt
+          the caller's own seam would refuse anyway.
+        - After, because a sleep duration is a floor, not a promise. The host
+          can suspend mid-sleep and stop the clock, turning a wait that
+          comfortably fit into one landing well past the deadline; forwarding on
+          the strength of the earlier prediction is how a retry escapes the
+          budget it was just checked against.
+
+        The second call passes ``0.0``: the question is no longer "does a wait
+        this long fit" but "is there any budget left at all".
+        """
+        if can_wait is not None and not can_wait(seconds):
+            raise BrokerRunDeadlineError(seconds)
+        self._sleep(seconds)
+        if can_wait is not None and not can_wait(0.0):
+            raise BrokerRunDeadlineError(seconds)
+
+    def forward_with_retry(
+        self,
+        request: dict[str, Any],
+        *,
+        can_wait: Callable[[float], bool] | None = None,
+    ) -> dict[str, Any]:
         """Forward with bounded retry on transient broker failures and
         transient *upstream* statuses (429/5xx), honoring ``Retry-After``.
 
@@ -304,7 +356,22 @@ class BrokerClient:
         (the cap targets runaway poll loops, not transient recovery). A
         non-transient result returns immediately; the per-entry forward cap
         propagates without retry. Raises the final ``BrokerError`` once
-        retries are exhausted — the caller maps it to a provider-error."""
+        retries are exhausted — the caller maps it to a provider-error.
+
+        ``can_wait(seconds)`` answers "does a sleep this long still fit inside
+        the run budget?", and is consulted before every sleep — the seam the run
+        budget could not otherwise reach. ``RETRY_ATTEMPTS`` sleeps of a
+        ``Retry-After`` capped at ``MAX_RETRY_AFTER_S`` is ~40 minutes of
+        forwards issued after the run was meant to be over, holding the refresh
+        lock throughout. Asked BEFORE the sleep on purpose: waiting right up to
+        the deadline and only then giving up spends the budget to learn nothing.
+        Refused, this raises ``BrokerRunDeadlineError`` and the caller banks a
+        deadline stub for this request alone.
+
+        A clock is deliberately NOT injected here to compute that itself: the
+        orchestrator owns the run's wall clock (see ``RUN_BUDGET_S``), and a
+        second clock in this client is a second thing to keep in agreement with
+        it. Default ``None`` keeps the pre-budget behaviour exactly."""
         attempt = 0
         last_error: BrokerError | None = None
         while attempt < self._retry_attempts:
@@ -318,7 +385,9 @@ class BrokerClient:
                 if not err.is_transient() or attempt + 1 >= self._retry_attempts:
                     raise
                 attempt += 1
-                self._sleep(self._backoff_s(attempt, err.retry_after_s))
+                self._sleep_within_budget(
+                    self._backoff_s(attempt, err.retry_after_s), can_wait
+                )
                 continue
             # 200 from the broker, but the upstream status is itself transient.
             if attempt + 1 < self._retry_attempts and _is_transient_upstream_status(
@@ -328,7 +397,9 @@ class BrokerClient:
                 retry_after = parse_retry_after(
                     _header_ci(envelope.get("headers") or {}, "retry-after")
                 )
-                self._sleep(self._backoff_s(attempt, retry_after))
+                self._sleep_within_budget(
+                    self._backoff_s(attempt, retry_after), can_wait
+                )
                 continue
             return envelope
         # Loop only exits via return/raise above; this satisfies the type

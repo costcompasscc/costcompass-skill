@@ -357,6 +357,90 @@ def test_retry_does_not_retry_non_transient():
     assert calls["n"] == 1  # forbidden is not transient → no retry
 
 
+def test_retry_refused_when_the_backoff_does_not_fit_the_budget():
+    # The run budget's third seam. Without it the loop sleeps the full
+    # Retry-After and forwards again with no deadline in sight — RETRY_ATTEMPTS
+    # sleeps at MAX_RETRY_AFTER_S is ~40 minutes past a 15-minute budget.
+    calls = {"n": 0}
+    slept: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(
+            503, json={"error": {"code": "internal_error", "message": "x"}}
+        )
+
+    client = make_broker(handler, sleep=slept.append)
+    with pytest.raises(broker.BrokerRunDeadlineError):
+        client.forward_with_retry(
+            {"target": {}, "headers": {}, "signing_token": "t"},
+            can_wait=lambda _seconds: False,
+        )
+    # One forward, and no sleep: the wait is refused BEFORE it is taken, since
+    # sleeping up to the deadline and only then giving up buys nothing.
+    assert calls["n"] == 1
+    assert slept == []
+
+
+def test_retry_proceeds_when_the_backoff_fits_the_budget():
+    # The other side of the check — a predicate that says yes must leave the
+    # pre-budget behaviour exactly as it was.
+    calls = {"n": 0}
+    asked: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(
+                503, json={"error": {"code": "internal_error", "message": "x"}}
+            )
+        return httpx.Response(
+            200, json={"status": 200, "headers": {}, "body": "Yg==", "signature": "s"}
+        )
+
+    def can_wait(seconds: float) -> bool:
+        asked.append(seconds)
+        return True
+
+    client = make_broker(handler, sleep=lambda *_: None)
+    resp = client.forward_with_retry(
+        {"target": {}, "headers": {}, "signing_token": "t"}, can_wait=can_wait
+    )
+    assert resp["status"] == 200
+    assert calls["n"] == 2
+    # Asked twice around the one sleep. First about the wait it is being
+    # OFFERED, not a bare "is the budget spent" — the whole point is that the
+    # answer depends on how long this particular backoff is. Then with 0 on the
+    # far side, where the only question left is whether any budget survived a
+    # sleep that may have run long.
+    assert asked == [broker.RETRY_BASE_S, 0.0]
+
+
+def test_retry_refused_when_the_sleep_itself_overruns_the_budget():
+    # A sleep duration is a floor, not a promise: the host can suspend
+    # mid-backoff, so an affordable wait can still end past the deadline. The
+    # predicate is therefore asked again on the far side of it — with 0, "is
+    # there any budget left at all" — before the next forward goes out.
+    calls = {"n": 0}
+    answers = [True, False]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(
+            503, json={"error": {"code": "internal_error", "message": "x"}}
+        )
+
+    client = make_broker(handler, sleep=lambda *_: None)
+    with pytest.raises(broker.BrokerRunDeadlineError):
+        client.forward_with_retry(
+            {"target": {}, "headers": {}, "signing_token": "t"},
+            can_wait=lambda _seconds: answers.pop(0),
+        )
+    # The wait was granted and taken; the forward on the far side never happens.
+    assert calls["n"] == 1
+    assert answers == []
+
+
 def test_retry_does_not_count_against_forward_cap():
     # Each transient retry sets is_retry, so a long retry streak can't trip the
     # per-entry forward cap (which targets runaway poll loops, not recovery).

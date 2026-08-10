@@ -92,6 +92,23 @@ class _Harness:
         self._lock = threading.Lock()
         self.on_forward = lambda count: None
         self.on_submit = lambda: None
+        # Every sleep the retry loop actually took. The retry seam's whole
+        # claim is that a wait too big for the budget is never taken, and
+        # "no forward happened" cannot tell that apart from a wait that was
+        # taken and then gave up.
+        self.sleeps: list[float] = []
+        # What the wall clock did WHILE a sleep ran. Default nothing; a test
+        # overrides it to model a host suspended mid-backoff, which is the only
+        # way a wait the budget could afford still lands past the deadline.
+        self.on_sleep = lambda seconds: None
+        # The broker envelope for forward N (1-based). Default is a healthy
+        # relayed 200; a test overrides it to throttle a chosen request.
+        self.broker_reply = lambda count: {
+            "status": 200,
+            "headers": {},
+            "body": "Yg==",
+            "signature": "s",
+        }
 
     def _api(self, request: httpx.Request) -> httpx.Response:
         path, method = request.url.path, request.method
@@ -140,12 +157,13 @@ class _Harness:
             self.forwards += 1
             count = self.forwards
         self.on_forward(count)
-        return httpx.Response(
-            200,
-            json={"status": 200, "headers": {}, "body": "Yg==", "signature": "s"},
-        )
+        return httpx.Response(200, json=self.broker_reply(count))
 
-    def run(self, concurrency: int = 1):
+    def _sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.on_sleep(seconds)
+
+    def run(self, concurrency: int = 1, run_budget_s: float = BUDGET_S):
         client = api.Client(
             "https://x/api/v1",
             "sk-cli",
@@ -155,6 +173,11 @@ class _Harness:
             "https://x/broker/v1",
             "sk-cli",
             http=httpx.Client(transport=httpx.MockTransport(self._broker)),
+            # Base 0 so a recorded sleep is the Retry-After the provider asked
+            # for and nothing else, and the sleep is recorded rather than taken
+            # — the suite must not spend real seconds to observe one.
+            retry_base_s=0.0,
+            sleep=self._sleep,
         )
         return orchestrator.run(
             config.Config(api_key="sk-cli", api_url="https://x/api/v1"),
@@ -166,7 +189,7 @@ class _Harness:
             echo=lambda *_: None,
             concurrency=concurrency,
             now=self.clock,
-            run_budget_s=BUDGET_S,
+            run_budget_s=run_budget_s,
         )
 
     def submitted_providers(self) -> list[str]:
@@ -261,6 +284,120 @@ def test_request_loop_stubs_every_abandoned_request():
         True,
         True,
     ]
+
+
+def _throttled(seconds: int) -> dict:
+    """An upstream 429 relayed through the broker, asking for `seconds` of wait."""
+    return {
+        "status": 429,
+        "headers": {"retry-after": str(seconds)},
+        "body": "Yg==",
+        "signature": "s",
+    }
+
+
+def test_retry_backoff_never_sleeps_past_the_deadline():
+    """The seam the other two cannot reach.
+
+    Before this existed the loop slept the full Retry-After and forwarded again
+    with no deadline in sight — ``RETRY_ATTEMPTS`` times over, at a ten-minute
+    cap, is ~40 minutes past a fifteen-minute budget, every second of it holding
+    the refresh lock.
+    """
+    h = _Harness(["deepseek"], purposes=["usage_1"])
+    h.broker_reply = lambda count: _throttled(600)
+
+    # Ten minutes of requested backoff against five minutes of budget. Stated as
+    # a short budget rather than an advanced clock so the wait is refused on the
+    # FIRST retry, with nothing else having happened.
+    h.run(concurrency=1, run_budget_s=300.0)
+
+    # One forward, and — the actual bug — no sleep at all. Sleeping right up to
+    # the deadline and only then giving up spends the budget to learn nothing,
+    # so the wait is refused before it is taken.
+    assert h.forwards == 1
+    assert h.sleeps == []
+
+    # Banked as the same stub a request the budget never issued gets: from the
+    # server's side they are one event, a planned segment nobody fetched.
+    responses = h.submitted[0]["responses"]
+    assert len(responses) == 1
+    assert responses[0]["status"] == 504
+    assert responses[0]["synthetic"] is True
+    assert responses[0]["request_url"] == "https://api.deepseek.test/usage_1"
+    assert responses[0]["request_purpose"] == "usage_1"
+
+
+def test_retry_whose_backoff_fits_is_still_taken():
+    """The other side of the check: a one-second Retry-After inside the full
+    budget behaves exactly as it did before, or the fix has traded a rare
+    overrun for routine lost recovery."""
+    h = _Harness(["deepseek"], purposes=["usage_1"])
+    h.broker_reply = lambda count: (
+        _throttled(1)
+        if count == 1
+        else {"status": 200, "headers": {}, "body": "Yg==", "signature": "s"}
+    )
+
+    h.run(concurrency=1)
+
+    assert h.forwards == 2
+    assert h.sleeps == [1.0]
+    responses = h.submitted[0]["responses"]
+    assert len(responses) == 1
+    assert responses[0].get("synthetic") is not True
+
+
+def test_retry_gives_up_when_the_sleep_itself_overruns_the_deadline():
+    """The prediction made before the sleep is not a guarantee.
+
+    A sleep duration is a floor: the host can suspend mid-backoff and stop the
+    clock, so a wait the budget could comfortably afford wakes far past the
+    deadline — and machine suspend is a case the run budget exists to catch.
+    Waking late and forwarding anyway is how a retry escapes a budget it just
+    passed.
+    """
+    h = _Harness(["deepseek"], purposes=["usage_1"])
+    h.broker_reply = lambda count: _throttled(1)
+    # A one-second wait the pre-check accepts, against a machine that was asleep
+    # for an hour while it ran.
+    h.on_sleep = lambda seconds: h.clock.advance(3600.0)
+
+    h.run(concurrency=1)
+
+    # The sleep was taken — it was affordable when asked for — but the forward
+    # on the far side of it is not issued.
+    assert h.sleeps == [1.0]
+    assert h.forwards == 1
+    responses = h.submitted[0]["responses"]
+    assert len(responses) == 1
+    assert responses[0]["status"] == 504
+    assert responses[0]["synthetic"] is True
+    assert responses[0]["request_purpose"] == "usage_1"
+
+
+def test_only_the_request_whose_backoff_did_not_fit_is_written_off():
+    """One provider asking for ten minutes has not spent the run's budget.
+
+    The alternative — treating an oversized backoff as "the run is over" —
+    throws away days there was still time to fetch, and the request seam is
+    already there to end the loop once the budget genuinely is gone.
+    """
+    h = _Harness(["deepseek"], purposes=["usage_1", "usage_2"])
+    # Requests within a plan are issued in order, so a counter names them: the
+    # first day is throttled, the second is healthy.
+    h.broker_reply = lambda count: (
+        _throttled(600)
+        if count == 1
+        else {"status": 200, "headers": {}, "body": "Yg==", "signature": "s"}
+    )
+
+    h.run(concurrency=1, run_budget_s=300.0)
+
+    assert h.forwards == 2
+    responses = h.submitted[0]["responses"]
+    assert [r["request_purpose"] for r in responses] == ["usage_1", "usage_2"]
+    assert [r.get("synthetic") is True for r in responses] == [True, False]
 
 
 def test_under_budget_is_untouched():

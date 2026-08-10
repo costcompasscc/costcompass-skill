@@ -37,6 +37,7 @@ from .broker import (
     BrokerClient,
     BrokerError,
     BrokerForwardCapError,
+    BrokerRunDeadlineError,
     broker_url_from_api,
     build_forward_request,
     provider_error_response,
@@ -157,12 +158,20 @@ def _acquire_run_lock() -> Generator[None]:
         os.close(fd)
 
 
-# Wall-clock budget for one whole run, checked only at seams where nothing is
-# in flight. Bounding a single request does not bound a run: an entry may hold
-# up to the broker's per-entry forward cap in requests, each retried up to
-# ``DEFAULT_RETRY_ATTEMPTS`` times honouring a Retry-After the broker caps at
-# ten minutes, so every per-request timeout can be respected while the run
-# lasts hours. All three relays hold the same figure.
+# Wall-clock budget for one whole run. Bounding a single request does not bound
+# a run: an entry may hold up to the broker's per-entry forward cap in requests,
+# each retried up to ``RETRY_ATTEMPTS`` times honouring a Retry-After the broker
+# caps at ten minutes, so every per-request timeout can be respected while the
+# run lasts hours. That product is what this bounds. All three relays hold the
+# same figure, and scripts/lib/conn_limits.py in the monorepo pins both it and
+# the two retry constants equal across the three — the retry pair multiplies
+# into the overrun, so a relay that drifts to a larger product re-opens it.
+#
+# Three seams consult it, all at points where no forward is in flight: before a
+# worker claims its next entry, before a flat request is issued, and — since a
+# deadline-blind backoff was worth ~40 minutes on its own — before each retry
+# sleep (``BrokerClient.forward_with_retry``'s ``can_wait``). Nothing already
+# issued is interrupted.
 #
 # WALL clock (``time.time``), not monotonic, and deliberately so: this budget
 # has to agree with the server's wall-clock lease on an abandoned run. A
@@ -552,7 +561,7 @@ def _run_flat(
     auth_headers: dict[str, str],
     signing_token: str | None,
     broker: BrokerClient,
-    past_deadline: Callable[[], bool] | None = None,
+    budget_allows: Callable[[float], bool] | None = None,
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     requests = list(plan.get("requests", []))
@@ -560,8 +569,10 @@ def _run_flat(
         # The run budget's second seam. An entry may hold many requests, so
         # checking only between entries would honour the budget on paper while
         # one entry stayed wedged for hours. Checked before the request is
-        # issued, never mid-flight.
-        if past_deadline is not None and past_deadline():
+        # issued, never mid-flight. ``0.0`` asks only whether any budget is
+        # left; the third seam, inside the retry loop below, asks whether a
+        # specific backoff fits.
+        if budget_allows is not None and not budget_allows(0.0):
             # Stop issuing, but bank what arrived: a synthetic stub per request
             # the budget cut off, so the App Server strips them, ingests the
             # siblings, and records the window as incomplete rather than
@@ -581,11 +592,21 @@ def _run_flat(
             return out
         try:
             resp = broker.forward_with_retry(
-                build_forward_request(req, auth_headers, signing_token)
+                build_forward_request(req, auth_headers, signing_token),
+                can_wait=budget_allows,
             )
         except BrokerForwardCapError:
             out.append(_synthetic_cap(req.get("url", ""), req.get("purpose", "")))
             return out
+        except BrokerRunDeadlineError:
+            # A backoff that did not fit the budget. Bank this request as the
+            # same stub the seam above emits for one never issued — from the
+            # App Server's side they are one event, a planned segment nobody
+            # fetched. Continue rather than stubbing the tail: one provider
+            # asking for a ten-minute wait has not spent the run's budget, and
+            # the seam above ends the loop once it truly is spent.
+            out.append(_synthetic_deadline(req))
+            continue
         except BrokerError as err:
             # Continue: one failed sub-request must not poison the others, and
             # the synthetic stub is what makes that true rather than aspirational
@@ -604,7 +625,7 @@ def _process_entry(
     client: api.Client,
     run_id: str,
     resolver: oauth.OAuthResolver | None,
-    past_deadline: Callable[[], bool] | None = None,
+    budget_allows: Callable[[float], bool] | None = None,
 ) -> EntryOutcome:
     provider = entry["provider_id"]
     instance = entry.get("instance_key", "")
@@ -686,7 +707,7 @@ def _process_entry(
                 )
             ]
     else:
-        responses = _run_flat(plan, auth_headers, signing_token, broker, past_deadline)
+        responses = _run_flat(plan, auth_headers, signing_token, broker, budget_allows)
 
     return _submit_outcome(
         client,
@@ -754,8 +775,18 @@ def _run(
     # clock rather than monotonic.
     deadline = now() + run_budget_s
 
+    def budget_allows(seconds: float) -> bool:
+        """Is there room in the budget to spend ``seconds`` and still be inside it?
+
+        One predicate for all three seams rather than a bare deadline passed
+        around, so "expired" means one thing everywhere. ``0.0`` asks the
+        entry-pool and request-loop question ("any budget left at all"); a
+        retry's backoff asks whether that particular wait fits.
+        """
+        return now() + seconds < deadline
+
     def past_deadline() -> bool:
-        return now() >= deadline
+        return not budget_allows(0.0)
 
     try:
         try:
@@ -798,7 +829,7 @@ def _run(
                 list(run_data.get("fetches", [])),
                 concurrency,
                 lambda entry: _process_entry(
-                    entry, vault, broker, client, run_id, resolver, past_deadline
+                    entry, vault, broker, client, run_id, resolver, budget_allows
                 ),
                 past_deadline,
             )
