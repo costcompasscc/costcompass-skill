@@ -224,3 +224,24 @@ def test_broker_failure_vector(vec: dict) -> None:
     )
     got = orchestrator._synthetic_broker_failure(vec["request"], err)
     assert _norm_response(got) == vec["expect"]
+
+
+# --- Flat-path run-deadline stub --------------------------------------------
+# The request -> submitted-payload mapping for a flat sub-request the run budget
+# left unissued. Its own corpus file rather than a broker-failure case: that
+# transform takes a BrokerError, this one takes nothing but the abandoned
+# request.
+#
+# This port is the one that already emitted the right shape when the corpus
+# gained this file — the browser and macOS were a release behind, banking
+# nothing and discarding the entry's fetched siblings. `make lockstep` could not
+# see that, because a stale port is an ABSENCE of the new shape rather than a
+# drifted line.
+
+_DEADLINE_STUB = _load("deadline-stub.json")
+
+
+@pytest.mark.parametrize("vec", _DEADLINE_STUB, ids=_ids(_DEADLINE_STUB))
+def test_deadline_stub_vector(vec: dict) -> None:
+    got = orchestrator._synthetic_deadline(vec["request"])
+    assert _norm_response(got) == vec["expect"]

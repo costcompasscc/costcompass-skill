@@ -1,0 +1,56 @@
+{
+  "_comment": "Flat-path run-deadline mapping: request -> the RawResponsePayload the relay submits for a sub-request the run budget left unissued. One stub PER abandoned request, each carrying its own real URL, so the App Server can name the individual missing segments and re-plan exactly those. Reference: deadlineStubResponse in frontend/src/lib/refresh/orchestrator.ts. Ports: _synthetic_deadline (CLI orchestrator.py), BrokerClient.syntheticDeadline (macOS). AUTHORED input, GENERATED expect - run `make gen-vectors` after changing the reference.",
+  "vectors": [
+    {
+      "name": "a per-day fan-out request keeps its own day",
+      "request": {
+        "url": "https://api.example.com/usage?day=17",
+        "purpose": "usage"
+      },
+      "expect": {
+        "kind": "relayed",
+        "status": 504,
+        "request_url": "https://api.example.com/usage?day=17",
+        "request_purpose": "usage",
+        "body_b64": "cnVuIGRlYWRsaW5lIGV4Y2VlZGVk",
+        "signature": null,
+        "headers": {},
+        "synthetic": true
+      }
+    },
+    {
+      "name": "a sibling day maps to a distinct stub, never the first request's",
+      "request": {
+        "url": "https://api.example.com/usage?day=18",
+        "purpose": "usage"
+      },
+      "expect": {
+        "kind": "relayed",
+        "status": 504,
+        "request_url": "https://api.example.com/usage?day=18",
+        "request_purpose": "usage",
+        "body_b64": "cnVuIGRlYWRsaW5lIGV4Y2VlZGVk",
+        "signature": null,
+        "headers": {},
+        "synthetic": true
+      }
+    },
+    {
+      "name": "a path-only url with a per-segment purpose survives verbatim",
+      "request": {
+        "url": "https://api.example.com/v1/organization/costs",
+        "purpose": "costs_2026_08"
+      },
+      "expect": {
+        "kind": "relayed",
+        "status": 504,
+        "request_url": "https://api.example.com/v1/organization/costs",
+        "request_purpose": "costs_2026_08",
+        "body_b64": "cnVuIGRlYWRsaW5lIGV4Y2VlZGVk",
+        "signature": null,
+        "headers": {},
+        "synthetic": true
+      }
+    }
+  ]
+}
