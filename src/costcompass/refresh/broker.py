@@ -43,6 +43,27 @@ RETRY_BASE_S = 0.5
 RETRY_FACTOR = 2.0
 MAX_RETRY_AFTER_S = 600.0
 
+# Backstop on a single forward, held equal across the three relays
+# (BROKER_FORWARD_TIMEOUT_MS in frontend/src/lib/broker/client.ts,
+# URLSessionTransport.resourceTimeout in the macOS Kit) and pinned by
+# scripts/lib/conn_limits.py alongside the run budget, fan-out width and retry
+# pair. It belongs with those: every deadline seam sits where nothing is in
+# flight, so how far a run can overrun its budget is exactly one in-flight
+# forward's ceiling.
+#
+# Nothing is expected to approach it — the broker bounds a forward itself at
+# worker_total_seconds = 90. What no server-side deadline can catch, and this
+# does, is a peer that accepts the request and then neither answers nor closes.
+#
+# Enforced as an ABSOLUTE bound on the whole exchange, matching the browser's
+# AbortSignal and macOS's timeoutIntervalForResource. Handing this to httpx as
+# `timeout=` alone would NOT do that — that is a per-phase no-progress clock, so
+# a peer trickling bytes resets it forever. `_send_with_deadline` streams the
+# body and checks a monotonic deadline around every chunk; the client's
+# per-phase timeout stays underneath it as the inner bound on a fully idle
+# connection.
+FORWARD_TIMEOUT_S = 120.0
+
 _TRANSIENT = {
     "rate_limited",
     "upstream_unreachable",
@@ -283,9 +304,20 @@ class BrokerClient:
         retry_base_s: float = RETRY_BASE_S,
         retry_factor: float = RETRY_FACTOR,
         sleep: Callable[[float], None] = time.sleep,
+        forward_timeout_s: float = FORWARD_TIMEOUT_S,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self.broker_url = broker_url.rstrip("/")
-        self._http = http or httpx.Client(timeout=120.0)
+        self._http = http or httpx.Client(timeout=FORWARD_TIMEOUT_S)
+        self._forward_timeout_s = forward_timeout_s
+        # A stopwatch, NOT a second view of the run's wall clock. The retry
+        # backoff deliberately takes a `can_wait` predicate instead of a clock,
+        # because a clock measuring the RUN would have to stay in agreement with
+        # the orchestrator's. This one measures a single forward from the moment
+        # it is issued and knows nothing about the run — the same thing
+        # `AbortSignal.timeout` and `timeoutIntervalForResource` are in the other
+        # two relays. Injected so a dribbling peer can be tested without one.
+        self._monotonic = monotonic
         # These are the headers of the CLI's own request to the broker, which is
         # the only hop the relay's identity belongs on. The forwarded request's
         # headers are built separately (``build_forward_request``) and the
@@ -437,15 +469,125 @@ class BrokerClient:
         self._check_cap(request)
         payload = self._build_body(request)
         try:
-            resp = self._http.post(
-                f"{self.broker_url}/forward", headers=self._headers, json=payload
-            )
+            resp = self._send_with_deadline(payload)
         except httpx.RequestError as exc:
             raise BrokerError("network_error", 0, str(exc)) from exc
 
         if resp.is_success:
             return self._parse_success(resp)
         raise self._parse_error(resp)
+
+    def _send_with_deadline(self, payload: dict[str, Any]) -> httpx.Response:
+        """POST /forward under an ABSOLUTE ceiling on the whole exchange.
+
+        "Whole exchange" is the load-bearing word, and it is why the exchange
+        runs on its own thread. Checking a deadline in this frame can only ever
+        observe lateness between blocking calls: ``httpx`` applies its timeout
+        to connect, write, read and pool acquisition INDEPENDENTLY, so a peer
+        that is slow to accept, slow to take the body, and slow to answer with
+        headers spends a full phase on each before any check here regains
+        control. Those stack well past the ceiling, and none of them can be
+        interrupted from inside — sync ``httpx`` exposes no cancellation.
+
+        Handing the work to a thread and joining with a timeout moves the bound
+        off what the request does and onto what the CALLER waits, which is the
+        thing the run budget is actually about: the orchestrator holds the
+        single-run lock for exactly as long as this returns in. The abandoned
+        thread is a daemon, holds no lock, and dies on its own per-phase
+        timeouts; it cannot outlive the process or delay one.
+        """
+        result: dict[str, Any] = {}
+
+        def run() -> None:
+            try:
+                result["response"] = self._read_fully(payload)
+            except BaseException as exc:  # noqa: BLE001 - re-raised on the caller
+                result["error"] = exc
+
+        worker = threading.Thread(target=run, name="cc-broker-forward", daemon=True)
+        worker.start()
+        # Real seconds, deliberately: this join is the bound on the caller, so a
+        # test's injected clock must not be able to make it wait longer than the
+        # suite does. The injected clock still drives `_read_fully`'s own checks.
+        worker.join(self._forward_timeout_s)
+        if worker.is_alive():
+            raise BrokerError(
+                "broker_timeout",
+                504,
+                f"broker forward exceeded {self._forward_timeout_s}s",
+            )
+        error = result.get("error")
+        if error is not None:
+            raise error
+        return result["response"]
+
+    def _read_fully(self, payload: dict[str, Any]) -> httpx.Response:
+        """Issue the request and drain the body, bounded from the inside.
+
+        ``httpx``'s ``timeout=`` is a per-phase no-progress clock: it bounds the
+        wait for the NEXT chunk, not the request. A peer trickling one byte
+        just inside it resets that clock forever, so the run holds its lock past
+        the deadline the budget exists to enforce — and the seams that consult
+        the budget are all at points where nothing is in flight, so none of them
+        can end it. The other two relays do not have this hole
+        (``AbortSignal.timeout`` and ``timeoutIntervalForResource`` are both
+        absolute), which made the shared 120s figure mean something weaker here
+        than the invariant it is pinned under claims.
+
+        So the body is streamed and the elapsed time checked around every chunk.
+        This is the INNER of two bounds and does not stand alone — it ends a
+        dribbling body promptly, in the thread doing the work, but it cannot
+        interrupt a blocking phase. `_send_with_deadline`'s join is the bound
+        that actually holds the ceiling; this one keeps the common case from
+        reaching it and leaving a thread behind.
+
+        Checked on BOTH sides of the read, as the retry seam is: before a chunk
+        so a body already past the ceiling stops immediately, and after the loop
+        so a response that is headers-only, or whose last chunk crossed the line,
+        is caught too. Raised as the transient ``broker_timeout`` the bodyless
+        504 path already produces — one behaviour, one code, and the retry seam
+        takes it from there unchanged.
+        """
+        request = self._http.build_request(
+            "POST", f"{self.broker_url}/forward", headers=self._headers, json=payload
+        )
+        deadline = self._monotonic() + self._forward_timeout_s
+        streamed = self._http.send(request, stream=True)
+        try:
+            if streamed.is_stream_consumed:
+                # The transport handed back a body that was already complete in
+                # memory. There is no incremental read to bound — nothing can
+                # dribble — so the deadline is checked once and the response
+                # returned untouched. Returned rather than rebuilt on purpose:
+                # `.content` here is already DECODED, so re-wrapping it with the
+                # original content-encoding header would decode it a second
+                # time. Real network responses stream and take the branch below.
+                self._check_deadline(deadline)
+                return streamed
+            chunks: list[bytes] = []
+            for chunk in streamed.iter_raw():
+                self._check_deadline(deadline)
+                chunks.append(chunk)
+            self._check_deadline(deadline)
+            # Raw bytes plus the original headers, so any content-encoding is
+            # applied exactly once — on read, by the reconstructed response —
+            # rather than here and again there.
+            return httpx.Response(
+                streamed.status_code,
+                headers=streamed.headers,
+                content=b"".join(chunks),
+                request=request,
+            )
+        finally:
+            streamed.close()
+
+    def _check_deadline(self, deadline: float) -> None:
+        if self._monotonic() >= deadline:
+            raise BrokerError(
+                "broker_timeout",
+                504,
+                f"broker forward exceeded {self._forward_timeout_s}s",
+            )
 
     @staticmethod
     def _parse_success(resp: httpx.Response) -> dict[str, Any]:

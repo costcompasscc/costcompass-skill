@@ -465,3 +465,138 @@ def test_retry_does_not_count_against_forward_cap():
     # for the same token would now trip it.
     with pytest.raises(broker.BrokerForwardCapError):
         client.forward({"target": {}, "headers": {}, "signing_token": "tok"})
+
+
+def _dribbling_response(chunks: int) -> httpx.Response:
+    """A peer that answers, then trickles the body one byte at a time.
+
+    The shape httpx's own `timeout=` cannot catch: every chunk arrives inside
+    the per-phase no-progress window, so that clock is reset forever and the
+    request never ends on its own.
+    """
+
+    def stream():
+        for _ in range(chunks):
+            yield b"x"
+
+    return httpx.Response(
+        200, headers={"content-type": "application/json"}, content=stream()
+    )
+
+
+def test_forward_deadline_stops_a_peer_that_dribbles_forever():
+    # A clock that advances a second per reading. The deadline is 3s, so the
+    # forward must abandon partway through rather than consuming all 100 chunks
+    # — which is exactly what the per-phase timeout would have allowed.
+    ticks = iter(range(1000))
+    client = make_broker(
+        lambda request: _dribbling_response(100),
+        forward_timeout_s=3,
+        monotonic=lambda: float(next(ticks)),
+    )
+    with pytest.raises(broker.BrokerError) as excinfo:
+        client.forward({"target": {}, "headers": {}})
+    # Mapped onto the transient code the bodyless-504 path already produces, so
+    # the retry seam handles it with no new branch.
+    assert excinfo.value.code == "broker_timeout"
+    assert excinfo.value.code in broker._TRANSIENT
+
+
+def test_forward_deadline_catches_a_headers_only_response():
+    # No chunk ever arrives, so a check placed only inside the read loop would
+    # never run. The far-side check is what catches this.
+    ticks = iter([0.0, 99.0, 99.0])
+    client = make_broker(
+        lambda request: httpx.Response(200, content=b""),
+        forward_timeout_s=1,
+        monotonic=lambda: next(ticks),
+    )
+    with pytest.raises(broker.BrokerError) as excinfo:
+        client.forward({"target": {}, "headers": {}})
+    assert excinfo.value.code == "broker_timeout"
+
+
+def test_forward_inside_the_deadline_is_untouched():
+    # The control: a normal response must survive streaming and reconstruction
+    # with its status, body and signature intact.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "status": 201,
+                "headers": {"a": "b"},
+                "body": "QQ==",
+                "signature": "s",
+            },
+        )
+
+    client = make_broker(handler, monotonic=lambda: 0.0)
+    resp = client.forward({"target": {}, "headers": {}})
+    assert resp["status"] == 201
+    assert resp["body"] == "QQ=="
+    assert resp["signature"] == "s"
+    assert resp["headers"] == {"a": "b"}
+
+
+def test_forward_streamed_body_is_reassembled_and_decoded_exactly_once():
+    # The reconstruction path, which the materialized-body tests above never
+    # reach. Chunked AND gzipped, because the reassembly keeps the original
+    # headers: raw bytes must be re-wrapped so content-encoding is applied once
+    # on read, not once here and again there.
+    import gzip
+
+    envelope = json.dumps(
+        {"status": 200, "headers": {"h": "v"}, "body": "QQ==", "signature": "sig"}
+    ).encode()
+    packed = gzip.compress(envelope)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        def stream():
+            for i in range(0, len(packed), 7):
+                yield packed[i : i + 7]
+
+        return httpx.Response(
+            200,
+            headers={"content-encoding": "gzip", "content-type": "application/json"},
+            content=stream(),
+        )
+
+    client = make_broker(handler, monotonic=lambda: 0.0)
+    resp = client.forward({"target": {}, "headers": {}})
+    assert resp["status"] == 200
+    assert resp["body"] == "QQ=="
+    assert resp["signature"] == "sig"
+    assert resp["headers"] == {"h": "v"}
+
+
+def test_forward_deadline_bounds_a_peer_that_stalls_before_headers():
+    # The gap a deadline checked only in this frame cannot close: httpx times
+    # connect/write/read INDEPENDENTLY, so a peer slow to answer at all burns a
+    # full phase before any in-frame check regains control. Only the join bounds
+    # this. Real seconds, because that is what the join measures.
+    import time as _time
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        _time.sleep(5)  # far past the ceiling below; never reached in-frame
+        return httpx.Response(200, json={"status": 200, "headers": {}, "body": ""})
+
+    client = make_broker(handler, forward_timeout_s=0.2)
+    started = _time.monotonic()
+    with pytest.raises(broker.BrokerError) as excinfo:
+        client.forward({"target": {}, "headers": {}})
+    elapsed = _time.monotonic() - started
+    assert excinfo.value.code == "broker_timeout"
+    # The caller is released at the ceiling, not when the peer finally answers.
+    assert elapsed < 1.0, f"caller waited {elapsed:.2f}s for a 0.2s ceiling"
+
+
+def test_forward_propagates_a_transport_error_from_the_worker_thread():
+    # The thread must not swallow failures: a connection error still has to
+    # arrive as the network_error the retry seam already knows.
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused", request=request)
+
+    client = make_broker(handler)
+    with pytest.raises(broker.BrokerError) as excinfo:
+        client.forward({"target": {}, "headers": {}})
+    assert excinfo.value.code == "network_error"
