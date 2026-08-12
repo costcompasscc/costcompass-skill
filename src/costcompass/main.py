@@ -150,9 +150,16 @@ def _models_for(
     return models
 
 
-def _emit(as_json: bool, data: Any, text: str) -> None:
-    """Print machine JSON or the human text, depending on ``--json``."""
+def _emit(as_json: bool, data: Any, text: str, note: str | None = None) -> None:
+    """Print machine JSON or the human text, depending on ``--json``.
+
+    ``note`` is an advisory line that goes to stderr, so ``costcompass mtd |
+    pbcopy`` still yields just the figure. Suppressed under ``--json``: a hint
+    on either stream would contaminate output something is parsing.
+    """
     typer.echo(json.dumps(data, indent=2) if as_json else text)
+    if note and not as_json:
+        typer.echo(note, err=True)
 
 
 def _subscription_cards(breakdown: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -266,13 +273,26 @@ def mtd(
         with api.Client(cfg.api_url, key) as client:
             if act.kind == "breakdown":
                 cards = client.breakdown()
+                # The breakdown payload is a bare list with nowhere to carry
+                # scope-level facts, so the freshness of these figures comes
+                # from the summary. Human output only — the emitted JSON stays
+                # the card list it has always been.
+                note = None if as_json else render.staleness_note(client.summary())
                 _emit(
-                    as_json, _breakdown_payload(cards), render.format_breakdown(cards)
+                    as_json,
+                    _breakdown_payload(cards),
+                    render.format_breakdown(cards),
+                    note,
                 )
                 return
             if act.kind == "total":
                 summary = client.summary()
-                _emit(as_json, summary, render.format_amount(summary))
+                _emit(
+                    as_json,
+                    summary,
+                    render.format_amount(summary),
+                    render.staleness_note(summary),
+                )
                 return
 
             providers = client.providers()
@@ -281,7 +301,12 @@ def mtd(
                 provider_id = prov["id"]
                 summary = client.summary(provider=provider_id)
                 if act.kind == "service":
-                    _emit(as_json, summary, render.format_amount(summary))
+                    _emit(
+                        as_json,
+                        summary,
+                        render.format_amount(summary),
+                        render.staleness_note(summary),
+                    )
                 else:
                     models = _models_for(client.breakdown(), provider_id)
                     label = prov.get("display_name") or provider_id
@@ -292,7 +317,10 @@ def mtd(
                         "models": models,
                     }
                     _emit(
-                        as_json, payload, render.format_details(label, summary, models)
+                        as_json,
+                        payload,
+                        render.format_details(label, summary, models),
+                        render.staleness_note(summary),
                     )
                 return
 
@@ -312,6 +340,10 @@ def mtd(
                 if act.kind == "service"
                 else render.format_subscription(label, cost)
             )
+            # No freshness note: a standalone subscription is a declared plan,
+            # not a fetched card, so nothing about it goes stale. The dashboard
+            # withholds the notice on a selected subscription for the same
+            # reason.
             _emit(as_json, _card_payload(sub), text)
     except (api.ApiError, services.ResolveError) as exc:
         _fail(str(exc))

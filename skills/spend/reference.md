@@ -181,6 +181,13 @@ the valid names — pass them back to the user; don't invent a mapping.
 - `mtd_as_of` — data-freshness timestamp; populated only for a single-provider
   view, `null` for the all-services total. Mention it as "data as of …" when
   present.
+- `newest_fetched_at` / `enabled_provider_count` — when these figures were last
+  pulled from the providers, and how many enabled cards that covers. `null` with
+  a non-zero count means nothing has ever been fetched. Nothing refreshes on its
+  own, so if the timestamp is more than about three days old, say so and point
+  at `costcompass mtd refresh --vault`. The CLI already prints this on stderr in
+  human mode; the fields are here so you can say the same thing in your own
+  words rather than repeat its line.
 - `details` adds `models[]` (`display_name`, `cost_usd`, `surface`); a row with
   `cost_usd == 0` and a `display_value` is a usage-count line, not a charge.
 

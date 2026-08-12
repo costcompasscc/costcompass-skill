@@ -7,6 +7,7 @@ command layer is responsible for printing them.
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 # C0 + C1 control characters (includes ESC 0x1b, which starts every ANSI/CSI/OSC
@@ -37,6 +38,17 @@ _SURFACES: dict[str, tuple[str, int]] = {
 }
 _UNKNOWN_SURFACE_ORDER = 999
 
+# How old the newest fetch in scope may be before we say so. The dashboard
+# states the same three days once as REFRESH_STALE_THRESHOLD_MS in
+# frontend/src/lib/dashboard-derived.ts. The rule spans two languages and cannot
+# be shared as code, so both sides are pinned to identical boundary cases by
+# tests named "contract: ..." — keep those names greppable across the repos.
+STALE_AFTER = timedelta(days=3)
+
+# Refresh is a MODE of `mtd`, not its own command, and --vault is mandatory
+# there — naming anything else would print an instruction that errors out.
+_REFRESH_COMMAND = "costcompass mtd refresh --vault"
+
 
 def money(value: float) -> str:
     return f"${value:,.2f}"
@@ -60,6 +72,48 @@ def incomplete_window_note(summary: dict[str, Any]) -> str | None:
         return None
     subject = "1 service hasn't" if count == 1 else f"{count} services haven't"
     return f"({subject} finished loading this month's data yet — this total may be low)"
+
+
+def staleness_note(summary: dict[str, Any], now: datetime | None = None) -> str | None:
+    """Reminder that these figures are old, or None when they are current.
+
+    Same shape and purpose as ``incomplete_window_note`` above: a caveat string
+    or nothing. This one answers "when did we last look", which the CLI cannot
+    otherwise tell a user — nothing here refreshes on its own, so a figure can
+    be months stale and still print as if it were today's.
+
+    Two of the dashboard's cases are decided upstream by the server's ``MAX``
+    over enabled cards rather than here — newest-wins, and a disabled card's
+    fresher stamp being ignored — so their tests live in the backend suite.
+    What is left is the arithmetic, and it must agree with the dashboard to the
+    boundary: exactly three days is silent (the floor is "older than", not "at
+    least"), and the day count is floored.
+    """
+    if (summary.get("enabled_provider_count") or 0) <= 0:
+        # No enabled card in scope, or a server too old to say. Nothing here
+        # refreshes, so a nudge to run refresh would be a lie.
+        return None
+    raw = summary.get("newest_fetched_at")
+    if not raw:
+        return f"No usage fetched yet. Run '{_REFRESH_COMMAND}' to pull your data."
+    try:
+        # `fromisoformat` accepts the server's trailing "Z" directly.
+        fetched = datetime.fromisoformat(str(raw))
+    except ValueError:
+        # Unreadable stamp. Stay quiet rather than guess: the card HAS fetched,
+        # so the never-fetched copy would be false, and no age can be computed.
+        return None
+    if fetched.tzinfo is None:
+        fetched = fetched.replace(tzinfo=UTC)
+    age = (now or datetime.now(UTC)) - fetched
+    # Clock skew puts the stamp in the future, giving a negative age that reads
+    # as fresh — so the day count below can never come out negative.
+    if age <= STALE_AFTER:
+        return None
+    return (
+        f"Not updated in {age.days} days. "
+        f"Run '{_REFRESH_COMMAND}' for the latest numbers."
+    )
 
 
 def format_amount(summary: dict[str, Any]) -> str:

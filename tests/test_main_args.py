@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from typer.testing import CliRunner
@@ -10,6 +11,15 @@ from costcompass import config, main
 from costcompass.refresh import orchestrator
 
 runner = CliRunner()
+
+
+def _now_iso() -> str:
+    """A just-now fetch stamp, in the format the server sends."""
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _stale_iso(days: int = 12) -> str:
+    return (datetime.now(UTC) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 # --- version ---------------------------------------------------------------
@@ -253,6 +263,12 @@ class _FakeCardsClient:
 
     def __exit__(self, *exc):
         return None
+
+    def summary(self, provider=None):
+        # The breakdown payload has nowhere to carry scope-level facts, so the
+        # human path reads freshness from here. Fresh, so these tests assert on
+        # the card output alone.
+        return {"enabled_provider_count": 1, "newest_fetched_at": _now_iso()}
 
     def providers(self):
         return [
@@ -547,3 +563,112 @@ def test_auth_status_reports_a_plaintext_file_source(clean_env, monkeypatch):
 
     assert report["api_key"]["source"] == config.SOURCE_ENV
     assert report["vault"]["source"] == config.SOURCE_FILE
+
+
+# --- Stale-data reminder wiring -------------------------------------------
+
+
+class _StaleClient:
+    """Every read path served, with a fetch old enough to warrant the note."""
+
+    def __init__(self, *a, **k):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return None
+
+    def summary(self, provider=None):
+        return {
+            "mtd_usd": 7.0,
+            "enabled_provider_count": 1,
+            "newest_fetched_at": _stale_iso(12),
+        }
+
+    def providers(self):
+        return [
+            {
+                "id": "anthropic",
+                "short_name": "Claude",
+                "display_name": "Anthropic (Claude)",
+                "enabled": True,
+            }
+        ]
+
+    def breakdown(self):
+        return [
+            {
+                "provider_id": "anthropic",
+                "display_name": "Anthropic",
+                "kind": "provider",
+                "cost_usd": 7.0,
+            }
+        ]
+
+
+STALE_NOTE = "Not updated in 12 days"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["mtd"],
+        ["mtd", "claude"],
+        ["mtd", "claude", "details"],
+        ["mtd", "breakdown"],
+    ],
+)
+def test_every_spend_path_warns_on_stale_data(clean_env, monkeypatch, argv):
+    """The ticket's whole point: no way to read a figure without being told how
+    old it is. Each of these is a separate branch in `mtd`, so parametrize
+    rather than trust one of them to stand for the rest."""
+    monkeypatch.setenv(config.ENV_API_KEY, "sk-x")
+    monkeypatch.setattr(main.api, "Client", _StaleClient)
+    result = runner.invoke(main.app, argv)
+    assert result.exit_code == 0
+    assert STALE_NOTE in result.stderr
+    assert "costcompass mtd refresh --vault" in result.stderr
+
+
+def test_stale_note_stays_off_stdout(clean_env, monkeypatch):
+    """`costcompass mtd | pbcopy` must still yield just the figure."""
+    monkeypatch.setenv(config.ENV_API_KEY, "sk-x")
+    monkeypatch.setattr(main.api, "Client", _StaleClient)
+    result = runner.invoke(main.app, ["mtd"])
+    assert result.stdout.strip() == "$7.00"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["mtd", "--json"],
+        ["mtd", "claude", "--json"],
+        ["mtd", "claude", "details", "--json"],
+        ["mtd", "breakdown", "--json"],
+    ],
+)
+def test_json_output_carries_no_stale_note(clean_env, monkeypatch, argv):
+    """A hint on either stream would contaminate output something is parsing."""
+    monkeypatch.setenv(config.ENV_API_KEY, "sk-x")
+    monkeypatch.setattr(main.api, "Client", _StaleClient)
+    result = runner.invoke(main.app, argv)
+    assert result.exit_code == 0
+    assert STALE_NOTE not in result.stderr
+    assert STALE_NOTE not in result.stdout
+    json.loads(result.stdout)
+
+
+def test_refresh_never_warns_about_stale_data(clean_env, monkeypatch):
+    """Refresh just updated the data, so a reminder to refresh would be absurd.
+    Today that holds because the refresh branch returns before the print path —
+    control flow, which a refactor can undo silently. Pin it."""
+    monkeypatch.setenv(config.ENV_API_KEY, "sk-x")
+    monkeypatch.setattr(main, "_read_vault_password", lambda: "pw")
+    monkeypatch.setattr(main.api, "Client", _StaleClient)
+    monkeypatch.setattr(main.orchestrator, "run", lambda *a, **k: [])
+    result = runner.invoke(main.app, ["mtd", "refresh", "--vault"])
+    assert result.exit_code == 0
+    assert "Not updated in" not in result.stderr
+    assert "Not updated in" not in result.stdout
