@@ -246,19 +246,79 @@ def test_wrong_vault_password_raises_refresh_error():
         )
 
 
-def test_keyless_card_raises_credential_skip():
-    # A flat/keyless card with no vault entry is a benign skip (subscription-
-    # only), NOT an auth failure — mirrors the browser's subscription-only skip.
+def _empty_vault():
+    """A decryptable vault holding no entries — every lookup misses."""
     blob = _vault_blob([])
-    v = vault.Vault(
+    return vault.Vault(
         doc=json.loads(vault.decrypt_jwe(blob, PASSWORD)[0]),
         p2s=os.urandom(16),
         p2c=vault.DEFAULT_PBKDF2_ITERS,
         revision=1,
     )
+
+
+def test_keyless_card_raises_credential_skip():
+    # A card the SERVER marked keyless-by-design is a benign skip (it folds a
+    # subscription and has no credential to hold), NOT an auth failure —
+    # mirrors the browser's subscription-only skip.
+    entry = {
+        "provider_id": "anthropic",
+        "instance_key": "",
+        "plan": {},
+        "public_config": {"subscription_only": "true"},
+    }
+    with pytest.raises(orchestrator.CredentialSkip, match="subscription-only card"):
+        orchestrator._resolve_credential(entry, _empty_vault(), None)
+
+
+def test_unmarked_vault_miss_raises_credential_missing():
+    # The regression pin. The App Server plans a fetch for every enabled card
+    # because it cannot see the vault, so a bare miss is ambiguous. Without the
+    # server's subscription_only marker the card was EXPECTED to hold a key and
+    # it is gone (never pasted on this machine, unmerged vault conflict) — fail
+    # it. Resolving this to a skip is what let a card silently stop updating
+    # while reporting healthy.
     entry = {"provider_id": "anthropic", "instance_key": "", "plan": {}}
-    with pytest.raises(orchestrator.CredentialSkip, match="no credential configured"):
-        orchestrator._resolve_credential(entry, v, None)
+    with pytest.raises(
+        orchestrator.CredentialMissing, match="no credential configured"
+    ):
+        orchestrator._resolve_credential(entry, _empty_vault(), None)
+
+
+def test_absent_credential_object_still_reaches_the_marker_decision():
+    # An absent/null `credential` means vault_key (the browser's
+    # `entry.credential ?? { kind: "vault_key" }`), so it must fall through to
+    # the keyless-vs-missing decision rather than short-circuiting to a skip.
+    # Pinned because that default is structural — no branch names it.
+    unmarked = {"provider_id": "openai", "instance_key": "", "plan": {}}
+    with pytest.raises(orchestrator.CredentialMissing):
+        orchestrator._resolve_credential(unmarked, _empty_vault(), None)
+
+    explicit_null = {
+        "provider_id": "openai",
+        "instance_key": "",
+        "plan": {},
+        "credential": None,
+        "public_config": {"subscription_only": "true"},
+    }
+    with pytest.raises(orchestrator.CredentialSkip, match="subscription-only card"):
+        orchestrator._resolve_credential(explicit_null, _empty_vault(), None)
+
+
+def test_subscription_only_marker_is_a_strict_string_true():
+    # The marker rides the string-valued public_config channel, so only the
+    # literal "true" counts — matching the browser and macOS comparisons. A
+    # truthy-looking neighbour must not be read as keyless, or the bug returns
+    # for anything the server spells differently.
+    for value in ("false", "1", "True", ""):
+        entry = {
+            "provider_id": "anthropic",
+            "instance_key": "",
+            "plan": {},
+            "public_config": {"subscription_only": value},
+        }
+        with pytest.raises(orchestrator.CredentialMissing):
+            orchestrator._resolve_credential(entry, _empty_vault(), None)
 
 
 def test_run_mints_from_the_server_vault_fetched_at_run_start():
@@ -438,6 +498,10 @@ def test_oauth_installation_grant_routing_raises_credential_skip():
     # The server routes an Organization App row to "oauth_installation_grant",
     # a kind the CLI doesn't implement — skip it cleanly (no provider knowledge
     # in the untrusted relay; it acts purely on the server-authored routing kind).
+    #
+    # Deliberately UNMARKED: this branch must be decided before the
+    # subscription_only read, because it is a documented limit of this client
+    # rather than a statement about the card. Marking it would hide a reordering.
     v = vault.Vault(
         doc={"entries": []},
         p2s=os.urandom(16),
@@ -454,9 +518,11 @@ def test_oauth_installation_grant_routing_raises_credential_skip():
         orchestrator._resolve_credential(entry, v, None)
 
 
-def test_unknown_future_kind_raises_credential_skip():
+def test_unknown_future_kind_follows_the_marker():
     # A kind the CLI doesn't implement (a future server-authored routing) must
-    # skip cleanly, never crash — the untrusted relay acts only on kinds it knows.
+    # never crash — the untrusted relay acts only on kinds it knows. It lands on
+    # the same keyless-vs-missing decision as vault_key, so the server's marker
+    # decides, not the unknown kind.
     v = vault.Vault(
         doc={"entries": []},
         p2s=os.urandom(16),
@@ -469,13 +535,20 @@ def test_unknown_future_kind_raises_credential_skip():
         "plan": {},
         "credential": {"kind": "mtls_cert"},
     }
-    with pytest.raises(orchestrator.CredentialSkip, match="no credential configured"):
+    with pytest.raises(
+        orchestrator.CredentialMissing, match="no credential configured"
+    ):
+        orchestrator._resolve_credential(entry, v, None)
+
+    entry["public_config"] = {"subscription_only": "true"}
+    with pytest.raises(orchestrator.CredentialSkip, match="subscription-only card"):
         orchestrator._resolve_credential(entry, v, None)
 
 
-def test_malformed_oauth_mint_routing_distinct_skip():
+def test_malformed_oauth_mint_routing_fails():
     # oauth_mint routing missing sentinel_key/mint_path is a plugin bug, not a
-    # keyless card — surface a distinguishable message even with a resolver set.
+    # keyless card. It FAILS rather than skips: a skip reads as healthy, which
+    # is exactly what hid the misconfiguration. The resolver is never reached.
     v = vault.Vault(
         doc={"entries": []},
         p2s=os.urandom(16),
@@ -492,11 +565,40 @@ def test_malformed_oauth_mint_routing_distinct_skip():
         "instance_key": "card-1",
         "plan": {},
         "credential": {"kind": "oauth_mint"},
+        # Marked keyless, and it still fails: a malformed routing is a defect
+        # regardless of what the card claims to be.
+        "public_config": {"subscription_only": "true"},
     }
     with pytest.raises(
-        orchestrator.CredentialSkip, match="malformed oauth_mint routing"
+        orchestrator.CredentialMissing, match="malformed oauth_mint routing"
     ):
         orchestrator._resolve_credential(entry, v, FakeResolver())
+
+
+def test_oauth_mint_without_a_resolver_fails():
+    # Mint-routed entry in a run with no OAuth resolver: the server says a
+    # credential exists and this client cannot obtain it. A wiring defect, so it
+    # must not fall through to the keyless decision, where an unrelated marker
+    # would decide the card's fate.
+    v = vault.Vault(
+        doc={"entries": []},
+        p2s=os.urandom(16),
+        p2c=vault.DEFAULT_PBKDF2_ITERS,
+        revision=1,
+    )
+    entry = {
+        "provider_id": "google",
+        "instance_key": "card-1",
+        "plan": {},
+        "credential": {
+            "kind": "oauth_mint",
+            "sentinel_key": "__google_oauth__",
+            "mint_path": "/google/mint",
+        },
+        "public_config": {"subscription_only": "true"},
+    }
+    with pytest.raises(orchestrator.CredentialMissing, match="no OAuth resolver"):
+        orchestrator._resolve_credential(entry, v, None)
 
 
 def _run_one_entry_capture(blob, run, response_json):
@@ -543,17 +645,42 @@ def _run_one_entry_capture(blob, run, response_json):
 
 
 def test_keyless_card_submits_no_credentials_skip():
-    # No vault credential for an enabled flat card → ONE no_credentials
-    # synthetic (204), so the server records ``skipped`` — not a 401 reauth.
+    # No vault credential for a card the server MARKED keyless → ONE
+    # no_credentials synthetic (204), so the server records ``skipped`` — not a
+    # 401 reauth.
     blob = _vault_blob([])
+    run = _flat_run()
+    run["fetches"][0]["public_config"] = {"subscription_only": "true"}
     outcomes, submitted = _run_one_entry_capture(
-        blob, _flat_run(), {"state": "skipped", "events_ingested": 0}
+        blob, run, {"state": "skipped", "events_ingested": 0}
     )
     r = submitted["responses"][0]
     assert r["status"] == 204
     assert r["synthetic"] is True
     assert r["synthetic_reason"] == "no_credentials"
     assert outcomes[0].state == "skipped"
+
+
+def test_unmarked_vault_miss_submits_a_401_and_fails_the_card():
+    # End-to-end counterpart of the resolver pin: an unmarked card whose vault
+    # key is missing submits a NON-synthetic 401, which the server classifies
+    # through the auth taxonomy and records ``failed``. A synthetic here would
+    # be stripped before plugin.process() and the card would read healthy — the
+    # whole bug.
+    blob = _vault_blob([])
+    outcomes, submitted = _run_one_entry_capture(
+        blob, _flat_run(), {"state": "failed", "events_ingested": 0}
+    )
+    assert len(submitted["responses"]) == 1
+    r = submitted["responses"][0]
+    assert r["status"] == 401
+    assert not r.get("synthetic")
+    assert r.get("synthetic_reason") is None
+    # The purpose comes off the plan, so the server can attribute the failure to
+    # the request it planned rather than a placeholder.
+    assert r["request_purpose"] == "usage"
+    assert outcomes[0].state == "failed"
+    assert "no credential configured" in (outcomes[0].error_message or "")
 
 
 def test_aborted_rotation_submits_a_badge_free_skip():

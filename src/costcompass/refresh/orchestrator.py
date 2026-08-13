@@ -287,6 +287,15 @@ SKIP_FOR_ABORT: dict[oauth.RotationPersistOutcome, str] = {
     oauth.RotationPersistOutcome.SUPERSEDED: SKIP_ROTATION_SUPERSEDED,
 }
 
+# Reserved ``public_config`` key the App Server sets on a keyless-by-design
+# (subscription-only) card at creation. Mirrors the backend's
+# ``SUBSCRIPTION_ONLY_CONFIG_KEY`` (backend/app/api/routes/providers.py), the
+# browser's copy in frontend/src/lib/refresh/credential.ts, and the macOS
+# ``RefreshOrchestrator.subscriptionOnlyConfigKey`` — keep the string in sync.
+# Its presence is what lets this resolver tell a legitimate keyless card from a
+# card whose vault key is merely missing.
+SUBSCRIPTION_ONLY_CONFIG_KEY = "subscription_only"
+
 
 class CredentialSkip(Exception):
     """Nothing to fetch for this card — *skip* it, don't fail it.
@@ -305,6 +314,18 @@ class CredentialSkip(Exception):
     def __init__(self, message: str, *, reason: str = SKIP_NO_CREDENTIALS) -> None:
         super().__init__(message)
         self.reason = reason
+
+
+class CredentialMissing(Exception):
+    """A credential this card was EXPECTED to have could not be obtained.
+
+    Distinct from ``CredentialSkip``, which means there was never one to get:
+    this records a *failed* card the user can act on, where a skip records a
+    benign one they cannot. ``_process_entry`` turns it into a synthetic 401 so
+    the App Server files the card under the auth taxonomy — mirroring the
+    browser's ``submitMissingCredentials`` and the macOS ``.missingCredentials``
+    resolution case.
+    """
 
 
 @dataclass
@@ -330,19 +351,6 @@ class RefreshResult:
     mtd_usd: float
 
 
-def _skip_reason(kind: str | None, provider: str) -> str:
-    """User-facing reason for skipping a card whose credential the CLI can't
-    obtain — derived from the server-authored routing kind, no provider id."""
-    if kind == "oauth_installation_grant":
-        return (
-            "this card needs an App-Server-issued installation grant the CLI "
-            "can't mint — refresh it from the web app"
-        )
-    # ``vault_key`` with no direct entry (keyless / subscription-only card), or
-    # any kind this client doesn't implement.
-    return f"no credential configured for '{provider}'"
-
-
 def _resolve_credential(
     entry: dict[str, Any],
     vault: vault_mod.Vault,
@@ -353,9 +361,13 @@ def _resolve_credential(
     Generic: the untrusted relay always tries a direct vault entry first (a pasted
     key). For minted credentials the App Server authors the routing on the
     entry's ``credential`` field; the CLI executes the kinds it implements
-    (``oauth_mint``) and skips the rest via ``CredentialSkip`` (a keyless
-    ``vault_key`` row, an ``oauth_installation_grant`` it can't mint, or any
-    unknown kind). No provider knowledge lives here — it's all server-authored.
+    (``oauth_mint``). No provider knowledge lives here — it's all server-authored.
+
+    The two ways this raises are not interchangeable. ``CredentialSkip`` says
+    there was never a credential to get — a keyless subscription-only card, or an
+    ``oauth_installation_grant`` row this client is documented not to serve.
+    ``CredentialMissing`` says one was expected and isn't here, which is a failed
+    card the user needs to see.
 
     ``vault`` is the run's ONE vault document, the same object the resolver
     holds — see the ownership note on ``OAuthResolver.__init__``. That is what
@@ -370,34 +382,74 @@ def _resolve_credential(
     if direct and direct.get("api_key"):
         return direct["api_key"]
 
+    # An absent ``credential`` object means ``vault_key`` — the same default the
+    # browser applies (``entry.credential ?? { kind: "vault_key" }``), so it
+    # reaches the keyless-vs-missing decision at the bottom rather than
+    # short-circuiting into an unconditional skip.
     routing = entry.get("credential") or {}
     kind = routing.get("kind")
     if kind == "oauth_mint":
         sentinel_key = routing.get("sentinel_key")
         mint_path = routing.get("mint_path")
         if not (sentinel_key and mint_path):
-            raise CredentialSkip(
+            # A plugin's ``credential_routing()`` is malformed — a defect, not a
+            # card without a credential. Failed rather than skipped so it is
+            # visible; a skip reads as healthy and hid the misconfiguration.
+            raise CredentialMissing(
                 f"malformed oauth_mint routing for '{provider}' — missing "
                 "sentinel_key or mint_path; check the plugin's "
                 "credential_routing() override"
             )
-        if resolver is not None:
-            try:
-                return resolver.access_token(provider, sentinel_key, mint_path)
-            except oauth.RotationAborted as exc:
-                # The vault's grant changed mid-run (the user disconnected or
-                # reconnected while this refresh was in flight), so the minted
-                # access token has been discarded and there is nothing to fetch
-                # with. Re-raised as a benign skip rather than left to fall
-                # through to the OAuthError handler: that path would badge the
-                # card ``reauth_required``, and the replacement grant is
-                # healthy. Telling the user to reconnect a working connection is
-                # its own bug. Mapping it HERE keeps the one skip-shaped exit
-                # in one place, and keeps oauth.py from importing this module.
-                raise CredentialSkip(
-                    str(exc), reason=SKIP_FOR_ABORT[exc.outcome]
-                ) from exc
-    raise CredentialSkip(_skip_reason(kind, provider))
+        if resolver is None:
+            # Mint-routed entry in a run with no OAuth resolver: this client
+            # cannot obtain the credential the server says exists. Wiring defect,
+            # so fail rather than fall through to the keyless decision below,
+            # where the card would be judged on a marker that says nothing about
+            # it. (``run_refresh`` always builds a resolver; None is a caller
+            # error, not a card state.)
+            raise CredentialMissing(
+                f"oauth_mint routing for '{provider}' but this run has no OAuth "
+                "resolver — the credential cannot be minted"
+            )
+        try:
+            return resolver.access_token(provider, sentinel_key, mint_path)
+        except oauth.RotationAborted as exc:
+            # The vault's grant changed mid-run (the user disconnected or
+            # reconnected while this refresh was in flight), so the minted
+            # access token has been discarded and there is nothing to fetch
+            # with. Re-raised as a benign skip rather than left to fall
+            # through to the OAuthError handler: that path would badge the
+            # card ``reauth_required``, and the replacement grant is
+            # healthy. Telling the user to reconnect a working connection is
+            # its own bug. Mapping it HERE keeps the one skip-shaped exit
+            # in one place, and keeps oauth.py from importing this module.
+            raise CredentialSkip(str(exc), reason=SKIP_FOR_ABORT[exc.outcome]) from exc
+
+    if kind == "oauth_installation_grant":
+        # A documented scope limit of this client, not a vault problem: the
+        # grant is App-Server-issued and only the web app can mint it. Decided
+        # BEFORE the marker read below for exactly that reason — the card is
+        # fine, this relay simply cannot serve it.
+        raise CredentialSkip(
+            "this card needs an App-Server-issued installation grant the CLI "
+            "can't mint — refresh it from the web app"
+        )
+
+    # ``vault_key`` (or an unknown future kind) with no direct entry. The App
+    # Server emits a plan optimistically for every enabled card — it cannot see
+    # the vault — so a bare miss is ambiguous: either a legitimate keyless
+    # subscription-only card (anthropic/openai, which fold a subscription) or a
+    # keyed card whose vault entry is missing on THIS machine (a host the user
+    # never pasted the key on, a non-merged vault conflict). Don't guess from the
+    # miss — that is a shadow state, and guessing "keyless" is what let a missing
+    # key report as healthy here. The server persists a ``subscription_only``
+    # marker on keyless-by-design cards; read the real flag. Marked → benign
+    # skip. Unmarked → a key was expected and is gone, so fail the card and let
+    # the user see it.
+    public_config = entry.get("public_config") or {}
+    if public_config.get(SUBSCRIPTION_ONLY_CONFIG_KEY) == "true":
+        raise CredentialSkip("subscription-only card — no credential to fetch")
+    raise CredentialMissing(f"no credential configured for '{provider}'")
 
 
 def _synthetic_cap(url: str, purpose: str) -> dict[str, Any]:
@@ -655,6 +707,28 @@ def _process_entry(
             instance,
             [_synthetic_skip(plan, exc.reason, str(exc))],
             fallback_state="skipped",
+            local_message=str(exc),
+            instance_label=label,
+        )
+    except CredentialMissing as exc:
+        # Synthesize a 401 so the server's plugin.process() raises
+        # ProviderAuthError and the card records ``failed`` under the auth
+        # taxonomy — mirroring the browser's ``submitMissingCredentials``. The
+        # user has no working credential for this card, which is accurate and
+        # actionable, where a skip was neither.
+        return _submit_outcome(
+            client,
+            run_id,
+            provider,
+            instance,
+            [
+                provider_error_response(
+                    401,
+                    _entry_purpose(plan) or "missing_credentials",
+                    str(exc),
+                )
+            ],
+            fallback_state="failed",
             local_message=str(exc),
             instance_label=label,
         )
