@@ -185,8 +185,8 @@ def format_details(
         f"  days remaining   : {summary.get('days_remaining', 0)}",
         f"  previous month   : {money(summary.get('previous_month_usd', 0.0))}",
     ]
-    if summary.get("mtd_as_of"):
-        lines.append(f"  data as of       : {safe_text(summary['mtd_as_of'])}")
+    if summary.get("newest_fetched_at"):
+        lines.append(f"  data as of       : {safe_text(summary['newest_fetched_at'])}")
     note = incomplete_window_note(summary)
     if note:
         lines.append(f"  {note}")

@@ -178,11 +178,10 @@ the valid names — pass them back to the user; don't invent a mapping.
 - `per_provider_burn` (total view only) — per-provider **metered-usage** daily
   burn, excluding subscriptions; a UI min-runway helper. Don't present it as a
   breakdown of `burn_rate_7day` — they intentionally differ.
-- `mtd_as_of` — data-freshness timestamp; populated only for a single-provider
-  view, `null` for the all-services total. Mention it as "data as of …" when
-  present.
 - `newest_fetched_at` / `enabled_provider_count` — when these figures were last
-  pulled from the providers, and how many enabled cards that covers. `null` with
+  pulled from the providers, and how many enabled cards that covers. This is the
+  one data-freshness signal, for every view including the all-services total;
+  mention it as "data as of …" when present. `null` with
   a non-zero count means nothing has ever been fetched. Nothing refreshes on its
   own, so if the timestamp is more than about three days old, say so and point
   at `costcompass mtd refresh --vault`. The CLI already prints this on stderr in

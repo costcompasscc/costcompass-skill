@@ -78,5 +78,5 @@ meanings. For a service or breakdown, chain the matching `mtd …` command after
   and `burn_rate_7day` (7-day daily burn, includes subscriptions) when relevant.
 - Report the **all-in card total** by default; only break out "subscription vs
   usage" when the user explicitly asks. (Full field meanings in the reference.)
-- Format money plainly (`$131.01`). Note "data as of …" when `mtd_as_of` is set.
+- Format money plainly (`$131.01`). Note "data as of …" when `newest_fetched_at` is set.
 - Never expose the API key, the vault password, or internal card UUIDs.
