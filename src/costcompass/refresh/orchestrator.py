@@ -173,13 +173,15 @@ def _acquire_run_lock() -> Generator[None]:
 # sleep (``BrokerClient.forward_with_retry``'s ``can_wait``). Nothing already
 # issued is interrupted.
 #
-# WALL clock (``time.time``), not monotonic, and deliberately so: this budget
-# has to agree with the server's wall-clock lease on an abandoned run. A
-# monotonic clock stops while the machine sleeps, so a laptop closed for two
-# hours would wake still believing it was inside its budget and submit into a
-# run the server had long since reaped. Retry backoff and the interpreter's
-# poll deadlines keep their own monotonic clocks — those measure pure
-# durations, a different job.
+# WALL clock (``time.time``), not monotonic, and deliberately so: what this
+# budget bounds keeps elapsing while the machine sleeps. The relay's refresh
+# lock stays held, the run row stays ``running`` server-side, and the retention
+# purge that is currently the only thing which clears it is itself wall-clock.
+# A monotonic clock stops during sleep, so a laptop closed for two hours would
+# wake still believing it was inside its budget and resume feeding a run that
+# has, by every clock that matters to the server, been open for hours. Retry
+# backoff and the interpreter's poll deadlines keep their own monotonic clocks
+# — those measure pure durations, a different job.
 RUN_BUDGET_S = 15 * 60
 
 

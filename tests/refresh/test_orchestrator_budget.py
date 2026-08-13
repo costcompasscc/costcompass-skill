@@ -446,8 +446,9 @@ def test_concurrent_drain_is_consistent():
 
 
 def test_deadline_still_raised_when_the_cancelling_finalize_fails():
-    """The deadline is the cause worth reporting; the server's lease reaps the
-    row whether or not this finalize landed."""
+    """The deadline is the cause worth reporting, and the run is the client's to
+    abandon whether or not this finalize landed. The row is then stranded
+    ``running`` until the retention horizon — there is no server-side reaper."""
     h = _Harness(["deepseek", "openai", "anthropic"], finalize_status=500)
     h.on_submit = lambda: h.clock.advance(BUDGET_S * 2)
 
