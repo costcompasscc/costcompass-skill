@@ -838,16 +838,27 @@ def _run(
                 # every thread has joined, so no card is still submitting and
                 # the run is not finalized out from under one.
                 #
-                # Finalize as cancelled so the row leaves `running` — an
-                # unfinalized run stays running until the server's lease reaps
-                # it, and a run stuck running is precisely what makes the next
-                # refresh appear to do nothing.
+                # Finalize as cancelled so the row leaves `running` —
+                # ``finalize_run`` is its only writer, so an unfinalized run
+                # stays running until the retention horizon deletes it.
                 try:
                     client.finalize_run(run_id, cancelled=True)
                 except api.ApiError:
                     # Swallow: the deadline is the story the caller needs, and
-                    # the server's lease reaps the row either way. Raising the
-                    # finalize error instead would report the wrong cause.
+                    # raising the finalize error instead would report the wrong
+                    # cause.
+                    #
+                    # NOT "the server's lease reaps the row either way", which is
+                    # what stood here and was false — there is no server-side
+                    # reaper, and invariant 10 in the browser's refresh
+                    # CLAUDE.md says not to write that sentence until the lease
+                    # exists. While the row sits `running` the App Server's four
+                    # ``run.status != "running"`` guards never fire, so a late
+                    # submit into it still writes.
+                    #
+                    # This failure gets no record here. macOS reports its
+                    # equivalent (``RefreshEvent.cancelFinalizeFailed``); giving
+                    # this one a channel is its own bead.
                     pass
                 raise RefreshDeadlineExceeded(
                     "Refresh took too long and was stopped. Some providers may "
