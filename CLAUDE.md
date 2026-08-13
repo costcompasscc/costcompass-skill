@@ -111,9 +111,13 @@ only fixes is a patch bump.
   (`{kind: "vault_key" | "oauth_mint" | "oauth_installation_grant",
   sentinel_key?, mint_path?}`) the App Server builds from the plugin's
   `credential_routing()`. The CLI executes the kinds it implements (direct
-  vault entry first, then `oauth_mint`) and skips any other kind with a
-  `no_credentials` synthetic. Adding an OAuth provider — or a new credential
-  variant — never touches this tree.
+  vault entry first, then `oauth_mint`) and skips any other kind with an
+  `unsupported_credential_kind` synthetic — decided by the kind alone, never
+  by the `subscription_only` marker, which answers a question about
+  `vault_key` cards only. Adding an OAuth provider — or a new credential
+  variant — never touches this tree, and a mechanism that ships on the server
+  before this independently-versioned client learns it costs the user a quiet
+  skip rather than a false "no credential configured" failure.
 - **Security.** Never log the vault password, decrypted keys, minted tokens,
   or the API key. The decrypted vault stays in process memory only — never
   written to disk. Neither secret is ever accepted as an argv value.
@@ -171,8 +175,8 @@ login keychain — which has already happened once.
   an App-Server-issued mint grant, not a vault refresh-token sentinel. The CLI
   doesn't special-case them — the App Server routes such rows to
   `credential.kind == "oauth_installation_grant"`, a kind the CLI doesn't
-  implement, so the generic credential resolver **skips it cleanly** (a
-  `no_credentials` synthetic → benign `skipped`) and prints a note to refresh
+  implement, so the generic credential resolver **skips it cleanly** (an
+  `unsupported_credential_kind` synthetic → benign `skipped`) and prints a note to refresh
   that card from the app. PAT cards (direct vault entry) and User-App cards
   (`oauth_mint`) work.
 

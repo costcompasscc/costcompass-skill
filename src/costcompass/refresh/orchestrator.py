@@ -279,6 +279,7 @@ def _run_with_concurrency(
 SKIP_NO_CREDENTIALS = "no_credentials"
 SKIP_SENTINEL_VANISHED = "oauth_sentinel_vanished"
 SKIP_ROTATION_SUPERSEDED = "oauth_rotation_superseded"
+SKIP_UNSUPPORTED_KIND = "unsupported_credential_kind"
 
 # Which marker each aborted rotation reports. Keyed lookup, not a conditional:
 # an unmapped abort outcome raises ``KeyError`` here instead of being silently
@@ -431,13 +432,28 @@ def _resolve_credential(
         # A documented scope limit of this client, not a vault problem: the
         # grant is App-Server-issued and only the web app can mint it. Decided
         # BEFORE the marker read below for exactly that reason — the card is
-        # fine, this relay simply cannot serve it.
+        # fine, this relay simply cannot serve it. Same marker as any other
+        # kind this relay doesn't implement: one concept, one reason.
         raise CredentialSkip(
             "this card needs an App-Server-issued installation grant the CLI "
-            "can't mint — refresh it from the web app"
+            "can't mint — refresh it from the web app",
+            reason=SKIP_UNSUPPORTED_KIND,
         )
 
-    # ``vault_key`` (or an unknown future kind) with no direct entry. The App
+    if kind is not None and kind != "vault_key":
+        # A kind the server shipped before this client learned it — the normal
+        # rollout order, and the CLI is versioned independently of the server so
+        # it can lag for months. Benign skip naming the reason, decided by the
+        # kind ALONE: the ``subscription_only`` marker below answers "is this
+        # keyless-by-design vault_key card?" and says nothing about a mechanism
+        # this relay never implemented. Judging the second by the first failed
+        # every affected card with a false "no credential configured".
+        raise CredentialSkip(
+            f"credential kind '{kind}' is not supported by this client — update it",
+            reason=SKIP_UNSUPPORTED_KIND,
+        )
+
+    # ``vault_key`` with no direct entry. The App
     # Server emits a plan optimistically for every enabled card — it cannot see
     # the vault — so a bare miss is ambiguous: either a legitimate keyless
     # subscription-only card (anthropic/openai, which fold a subscription) or a

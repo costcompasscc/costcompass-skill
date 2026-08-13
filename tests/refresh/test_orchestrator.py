@@ -514,15 +514,25 @@ def test_oauth_installation_grant_routing_raises_credential_skip():
         "plan": {},
         "credential": {"kind": "oauth_installation_grant"},
     }
-    with pytest.raises(orchestrator.CredentialSkip, match="installation grant"):
+    with pytest.raises(orchestrator.CredentialSkip, match="installation grant") as exc:
         orchestrator._resolve_credential(entry, v, None)
+    # Same category as any other kind this relay doesn't implement, so the same
+    # server-recognised marker — the reason the App Server persists is what tells
+    # triage "old client", and no_credentials persists nothing at all.
+    assert exc.value.reason == orchestrator.SKIP_UNSUPPORTED_KIND
 
 
-def test_unknown_future_kind_follows_the_marker():
+def test_unknown_future_kind_skips_regardless_of_the_marker():
     # A kind the CLI doesn't implement (a future server-authored routing) must
-    # never crash — the untrusted relay acts only on kinds it knows. It lands on
-    # the same keyless-vs-missing decision as vault_key, so the server's marker
-    # decides, not the unknown kind.
+    # never crash and must never FAIL the card — the untrusted relay acts only on
+    # kinds it knows, and the server ships a new mechanism before this
+    # independently-versioned client learns it.
+    #
+    # Both halves are pinned deliberately. The marker used to decide this branch,
+    # so an unmarked card reported "no credential configured" (a 401, card
+    # failed) on every relay lagging the server. The marker answers a question
+    # about vault_key cards and must not reach an unimplemented kind at all —
+    # marked and unmarked have to land on the same benign skip.
     v = vault.Vault(
         doc={"entries": []},
         p2s=os.urandom(16),
@@ -535,14 +545,11 @@ def test_unknown_future_kind_follows_the_marker():
         "plan": {},
         "credential": {"kind": "mtls_cert"},
     }
-    with pytest.raises(
-        orchestrator.CredentialMissing, match="no credential configured"
-    ):
-        orchestrator._resolve_credential(entry, v, None)
-
-    entry["public_config"] = {"subscription_only": "true"}
-    with pytest.raises(orchestrator.CredentialSkip, match="subscription-only card"):
-        orchestrator._resolve_credential(entry, v, None)
+    for public_config in ({}, {"subscription_only": "true"}):
+        entry["public_config"] = public_config
+        with pytest.raises(orchestrator.CredentialSkip, match="not supported") as exc:
+            orchestrator._resolve_credential(entry, v, None)
+        assert exc.value.reason == orchestrator.SKIP_UNSUPPORTED_KIND
 
 
 def test_malformed_oauth_mint_routing_fails():

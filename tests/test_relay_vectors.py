@@ -245,3 +245,61 @@ _DEADLINE_STUB = _load("deadline-stub.json")
 def test_deadline_stub_vector(vec: dict) -> None:
     got = orchestrator._synthetic_deadline(vec["request"])
     assert _norm_response(got) == vec["expect"]
+
+
+# --- Credential routing decision --------------------------------------------
+# Which outcome CATEGORY the relay resolves an entry to, given the
+# server-authored credential.kind, the subscription_only marker, and whether the
+# vault holds a direct entry. A pure decision over data — no mint, no I/O.
+#
+# The categories are language-neutral because the three relays represent the
+# outcome differently: a union in the browser, an enum on macOS, and raised
+# exceptions here. The human message is not pinned (each relay names itself in
+# it); the wire ``reason`` is, because that is what the App Server reads.
+
+_CREDENTIAL_ROUTING = _load("credential-routing.json")
+
+
+def _empty_vault() -> vault.Vault:
+    return vault.Vault(
+        doc={"entries": []},
+        p2s=b"\x00" * 16,
+        p2c=vault.DEFAULT_PBKDF2_ITERS,
+        revision=1,
+    )
+
+
+def _vault_with_direct_entry(provider: str) -> vault.Vault:
+    v = _empty_vault()
+    v.doc["entries"] = [
+        {
+            "id": "1",
+            "provider": provider,
+            "api_key": "sk-direct",
+            "metadata": {"instance_key": ""},
+        }
+    ]
+    return v
+
+
+@pytest.mark.parametrize("vec", _CREDENTIAL_ROUTING, ids=_ids(_CREDENTIAL_ROUTING))
+def test_credential_routing_vector(vec: dict) -> None:
+    provider = "someprovider"
+    entry = {
+        "provider_id": provider,
+        "instance_key": "",
+        "plan": {},
+        "credential": vec["entry"]["credential"],
+        "public_config": vec["entry"]["public_config"],
+    }
+    v = _vault_with_direct_entry(provider) if vec["vault_has_entry"] else _empty_vault()
+
+    try:
+        orchestrator._resolve_credential(entry, v, None)
+        got = {"kind": "credential"}
+    except orchestrator.CredentialSkip as exc:
+        got = {"kind": "skip", "reason": exc.reason}
+    except orchestrator.CredentialMissing:
+        got = {"kind": "missing"}
+
+    assert got == vec["expect"]
