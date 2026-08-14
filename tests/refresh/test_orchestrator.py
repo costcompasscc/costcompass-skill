@@ -1609,6 +1609,58 @@ def test_submit_failure_keeps_a_local_message_over_the_generic_reason():
     assert outcome.error_message == "this card has no key on this device"
 
 
+def _submit_returning(result: dict):
+    class _Submit:
+        def submit_responses(self, run_id, payload):
+            return result
+
+    return _Submit()
+
+
+def test_server_sentence_wins_over_the_local_one():
+    # LOCKSTEP INVARIANT: the App Server authors the user-visible skip sentence
+    # and every relay renders it; the local copy is only for the submit-failure
+    # path above, where no verdict arrived. Pinned because the transcript this
+    # feeds is the ONE surface where that prose is ever read.
+    outcome = orchestrator._submit_outcome(
+        _submit_returning(
+            {
+                "state": "skipped",
+                "events_ingested": 0,
+                "error_message": "Only the CostCompass web app can refresh this connection — refresh it there.",
+            }
+        ),
+        "run-1",
+        "github",
+        "",
+        responses=[],
+        fallback_state="skipped",
+        local_message="this card needs an installation grant the CLI can't mint",
+    )
+    assert outcome.state == "skipped"
+    assert outcome.error_message == (
+        "Only the CostCompass web app can refresh this connection — refresh it there."
+    )
+
+
+def test_an_empty_server_sentence_falls_back_to_the_local_one():
+    # "" is the server saying "nothing to explain" (a keyless card's steady
+    # state), not "here is a message that happens to be blank". It has to fall
+    # back, or the transcript prints a card line with an empty note.
+    outcome = orchestrator._submit_outcome(
+        _submit_returning(
+            {"state": "skipped", "events_ingested": 0, "error_message": ""}
+        ),
+        "run-1",
+        "anthropic",
+        "",
+        responses=[],
+        fallback_state="skipped",
+        local_message="subscription-only card — no credential to fetch",
+    )
+    assert outcome.error_message == "subscription-only card — no credential to fetch"
+
+
 def test_a_card_resolved_after_a_mid_run_reload_reads_the_reloaded_document():
     # LOCKSTEP INVARIANT (browser invariant 11): one vault owner per run. The
     # resolver and this orchestrator loop read the SAME `Vault` object, so a

@@ -621,6 +621,13 @@ def _submit_outcome(
         instance,
         result.get("state", fallback_state),
         events_ingested=result.get("events_ingested", 0),
+        # The server authors the user-visible sentence and we render it; ours is
+        # only for the ApiError branch above, where no verdict arrived. ``or``,
+        # not a None-check: the server sends "" for a skip with nothing to
+        # explain (``SYNTHETIC_SKIP_REASONS`` in backend/app/schemas/fetch.py),
+        # which means "nothing to say" and must fall back rather than print an
+        # empty note. The sibling relays normalise the empty string explicitly
+        # because ``??`` would not — do not "simplify" this to match them.
         error_message=result.get("error_message") or local_message,
         instance_label=instance_label,
     )
