@@ -933,12 +933,14 @@ def _run(
                 # Finalize as cancelled so the row leaves `running` —
                 # ``finalize_run`` is its only writer, so an unfinalized run
                 # stays running until the retention horizon deletes it.
+                stranded = ""
                 try:
                     client.finalize_run(run_id, cancelled=True)
-                except api.ApiError:
-                    # Swallow: the deadline is the story the caller needs, and
-                    # raising the finalize error instead would report the wrong
-                    # cause.
+                except api.ApiError as exc:
+                    # The THROW is swallowed: the deadline is the story the
+                    # caller needs, and raising the finalize error instead would
+                    # report the wrong cause. The FAILURE is not — it rides
+                    # along on that same message.
                     #
                     # NOT "the server's lease reaps the row either way", which is
                     # what stood here and was false — there is no server-side
@@ -946,15 +948,37 @@ def _run(
                     # CLAUDE.md says not to write that sentence until the lease
                     # exists. While the row sits `running` the App Server's four
                     # ``run.status != "running"`` guards never fire, so a late
-                    # submit into it still writes.
+                    # submit into it still writes. That is what makes this worth
+                    # reporting: nothing else anywhere records that the run was
+                    # abandoned mid-flight.
                     #
-                    # This failure gets no record here. macOS reports its
-                    # equivalent (``RefreshEvent.cancelFinalizeFailed``); giving
-                    # this one a channel is its own bead.
-                    pass
+                    # The exception message rather than ``echo`` because this has
+                    # to reach the user in every mode: ``echo`` is a no-op under
+                    # ``--json`` (see main), which is the scripted use where a
+                    # stranded run is least likely to be noticed, and the call
+                    # site sits inside the progress ticker, whose dots an echoed
+                    # line would land in the middle of. Raising instead reaches
+                    # main's single error sink, which writes stderr and sanitizes.
+                    #
+                    # Status only, never the error text — the same rule the two
+                    # sibling relays follow, and the status is also the part
+                    # worth having: a 502/504 is the gateway being down, while a
+                    # 409 or 404 means this relay finalized a run twice or
+                    # against an id the server does not have, which is a defect.
+                    # No newline before it: the sink strips control characters,
+                    # ``\n`` among them, so the sentences run together anyway.
+                    detail = (
+                        f"HTTP {exc.status}"
+                        if exc.status is not None
+                        else "the server could not be reached"
+                    )
+                    stranded = (
+                        f" The server was not told this run was cancelled "
+                        f"({detail}), so it may show as still running for a while."
+                    )
                 raise RefreshDeadlineExceeded(
                     "Refresh took too long and was stopped. Some providers may "
-                    "not have been updated — try again."
+                    "not have been updated — try again." + stranded
                 )
             client.finalize_run(run_id)
 

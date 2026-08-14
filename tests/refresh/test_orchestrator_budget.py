@@ -80,10 +80,12 @@ class _Harness:
         self,
         providers: list[str],
         purposes: list[str] | None = None,
-        finalize_status: int = 200,
+        finalize_status: int | None = 200,
     ) -> None:
         self.providers = providers
         self.purposes = purposes or ["usage"]
+        # None models a transport failure rather than an HTTP answer — the
+        # shape that reaches the caller as an ApiError carrying no status.
         self.finalize_status = finalize_status
         self.clock = _Clock()
         self.submitted: list[dict] = []
@@ -143,6 +145,8 @@ class _Harness:
         if "/finalize" in path:
             with self._lock:
                 self.finalize_bodies.append(json.loads(request.content))
+            if self.finalize_status is None:
+                raise httpx.ConnectError("finalize never left the machine")
             if self.finalize_status != 200:
                 return httpx.Response(self.finalize_status, json={"error": "nope"})
             return httpx.Response(
@@ -452,5 +456,55 @@ def test_deadline_still_raised_when_the_cancelling_finalize_fails():
     h = _Harness(["deepseek", "openai", "anthropic"], finalize_status=500)
     h.on_submit = lambda: h.clock.advance(BUDGET_S * 2)
 
-    with pytest.raises(orchestrator.RefreshDeadlineExceeded):
+    with pytest.raises(orchestrator.RefreshDeadlineExceeded) as caught:
         h.run(concurrency=1)
+
+    # The deadline sentence survives intact — it is the actionable one, and the
+    # stranded-row note must not displace it.
+    assert "Refresh took too long" in str(caught.value)
+
+
+def test_a_failed_cancelling_finalize_names_its_status():
+    """This relay has no logger and no telemetry, so the message main prints is
+    the only channel the failure has. Status only, never the server's error text
+    — and the status is the part worth having: a 500 is the server having a bad
+    day, while a 409 would mean this relay finalized a run twice."""
+    h = _Harness(["deepseek", "openai", "anthropic"], finalize_status=500)
+    h.on_submit = lambda: h.clock.advance(BUDGET_S * 2)
+
+    with pytest.raises(orchestrator.RefreshDeadlineExceeded) as caught:
+        h.run(concurrency=1)
+
+    message = str(caught.value)
+    assert "was not told this run was cancelled" in message
+    assert "HTTP 500" in message
+    # The body the server sent back with that status stays out of the line.
+    assert "nope" not in message
+
+
+def test_a_cancelling_finalize_that_never_landed_says_so_without_a_status():
+    """A transport failure reaches the caller as an ApiError carrying no status,
+    and the note must not print a bare ``None`` at the user."""
+    h = _Harness(["deepseek", "openai", "anthropic"], finalize_status=None)
+    h.on_submit = lambda: h.clock.advance(BUDGET_S * 2)
+
+    with pytest.raises(orchestrator.RefreshDeadlineExceeded) as caught:
+        h.run(concurrency=1)
+
+    message = str(caught.value)
+    assert "was not told this run was cancelled" in message
+    assert "could not be reached" in message
+    assert "None" not in message
+
+
+def test_a_landed_cancelling_finalize_adds_no_note():
+    """The note is a report of a failure, not a footnote on every timeout — a
+    run whose cancelling finalize succeeded is not stranded and must not say so."""
+    h = _Harness(["deepseek", "openai", "anthropic"])
+    h.on_submit = lambda: h.clock.advance(BUDGET_S * 2)
+
+    with pytest.raises(orchestrator.RefreshDeadlineExceeded) as caught:
+        h.run(concurrency=1)
+
+    assert h.finalize_bodies == [{"cancelled": True}]
+    assert "was not told this run was cancelled" not in str(caught.value)

@@ -375,12 +375,43 @@ def test_refresh_json_forces_quiet_and_emits_payload(clean_env, monkeypatch):
     }
 
 
+@pytest.mark.parametrize("extra", [[], ["--json"]])
+def test_refresh_deadline_message_reaches_the_user_in_every_mode(
+    clean_env, monkeypatch, extra
+):
+    """A run that gives up on its budget reports a failed cancelling finalize by
+    appending it to the deadline message, precisely so it survives ``--json``:
+    the ``echo`` seam the orchestrator prints its per-card lines through is a
+    no-op there, and a stranded run row is least likely to be noticed in exactly
+    that scripted use. This is the only test that covers the last hop — the
+    orchestrator suite stops at the exception it raises."""
+    monkeypatch.setenv(config.ENV_API_KEY, "sk-x")
+    monkeypatch.setattr(main, "_read_vault_password", lambda: "pw")
+
+    def fake_run(*a, **kw):
+        raise orchestrator.RefreshDeadlineExceeded(
+            "Refresh took too long and was stopped. Some providers may not "
+            "have been updated — try again. The server was not told this run "
+            "was cancelled (HTTP 500), so it may show as still running for a "
+            "while."
+        )
+
+    monkeypatch.setattr(main.orchestrator, "run", fake_run)
+    result = runner.invoke(main.app, ["mtd", "refresh", "--vault", *extra])
+
+    assert result.exit_code != 0
+    assert "was not told this run was cancelled" in result.output
+    assert "HTTP 500" in result.output
+    # The actionable sentence is not displaced by the diagnostic one.
+    assert "Refresh took too long" in result.output
+
+
 # --- auth: verify before storing -----------------------------------------
 # A mistyped secret (notably the vault password, which unlocks every provider
 # credential) must never be persisted. Storing first and validating later put a
 # plaintext vault password on disk while reporting success.
 
-from costcompass import secrets  # noqa: E402
+from costcompass import secrets
 
 
 @pytest.fixture
