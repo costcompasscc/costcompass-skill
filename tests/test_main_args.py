@@ -585,6 +585,17 @@ class _StaleClient:
             "mtd_usd": 7.0,
             "enabled_provider_count": 1,
             "newest_fetched_at": _stale_iso(12),
+            # The server decides which cards are behind and by how much; this
+            # fixture states that answer rather than a timestamp to be aged.
+            "stale_cards": [
+                {
+                    "provider_id": "anthropic",
+                    "instance_key": "",
+                    "display_name": "Claude",
+                    "days": 12,
+                    "blocked": False,
+                }
+            ],
         }
 
     def providers(self):
@@ -608,7 +619,7 @@ class _StaleClient:
         ]
 
 
-STALE_NOTE = "Not updated in 12 days"
+STALE_NOTE = "Not updated: Claude (12 days)"
 
 
 @pytest.mark.parametrize(

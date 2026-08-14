@@ -7,7 +7,6 @@ command layer is responsible for printing them.
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime, timedelta
 from typing import Any
 
 # C0 + C1 control characters (includes ESC 0x1b, which starts every ANSI/CSI/OSC
@@ -38,13 +37,6 @@ _SURFACES: dict[str, tuple[str, int]] = {
 }
 _UNKNOWN_SURFACE_ORDER = 999
 
-# How old the newest fetch in scope may be before we say so. The dashboard
-# states the same three days once as REFRESH_STALE_THRESHOLD_MS in
-# frontend/src/lib/dashboard-derived.ts. The rule spans two languages and cannot
-# be shared as code, so both sides are pinned to identical boundary cases by
-# tests named "contract: ..." — keep those names greppable across the repos.
-STALE_AFTER = timedelta(days=3)
-
 # Refresh is a MODE of `mtd`, not its own command, and --vault is mandatory
 # there — naming anything else would print an instruction that errors out.
 _REFRESH_COMMAND = "costcompass mtd refresh --vault"
@@ -74,46 +66,64 @@ def incomplete_window_note(summary: dict[str, Any]) -> str | None:
     return f"({subject} finished loading this month's data yet — this total may be low)"
 
 
-def staleness_note(summary: dict[str, Any], now: datetime | None = None) -> str | None:
-    """Reminder that these figures are old, or None when they are current.
+def staleness_note(summary: dict[str, Any]) -> str | None:
+    """Which services are missing from these figures, or None when none are.
 
     Same shape and purpose as ``incomplete_window_note`` above: a caveat string
-    or nothing. This one answers "when did we last look", which the CLI cannot
-    otherwise tell a user — nothing here refreshes on its own, so a figure can
-    be months stale and still print as if it were today's.
+    or nothing. This one answers "which service is out of date", which the CLI
+    cannot otherwise tell a user — nothing here refreshes on its own, so a
+    figure can be months stale and still print as if it were today's.
 
-    Two of the dashboard's cases are decided upstream by the server's ``MAX``
-    over enabled cards rather than here — newest-wins, and a disabled card's
-    fresher stamp being ignored — so their tests live in the backend suite.
-    What is left is the arithmetic, and it must agree with the dashboard to the
-    boundary: exactly three days is silent (the floor is "older than", not "at
-    least"), and the day count is floored.
+    Every judgement is the server's: which cards are behind, how far, and
+    whether Refresh can even fix them (``stale_cards`` on the MTD summary). The
+    threshold arithmetic that used to live here is gone with it — the dashboard
+    and this renderer each stated the same three days, and a rule written twice
+    in two languages only stays honest for as long as someone keeps mirroring
+    the tests.
+
+    **Every card is listed, never truncated.** The dashboard trims to three
+    names because it renders beside a figure in a fixed row; this output is read
+    by a person or by the skill's model, either of which can take the whole list
+    and neither of which is served by a hidden remainder. What this must NOT do
+    is re-decide *whether* a card is a problem — that judgement is the server's,
+    or the two surfaces drift apart again.
     """
     if (summary.get("enabled_provider_count") or 0) <= 0:
         # No enabled card in scope, or a server too old to say. Nothing here
         # refreshes, so a nudge to run refresh would be a lie.
         return None
-    raw = summary.get("newest_fetched_at")
-    if not raw:
+    cards = summary.get("stale_cards") or []
+    if not cards:
+        # Every card current, or a server predating the field — both silent.
+        return None
+    listed = ", ".join(_stale_card_label(card) for card in cards)
+    # Blocked is resolved BEFORE never-fetched, because the two overlap: a card
+    # whose very first fetch failed on a bad credential has no age AND cannot be
+    # collected, so the first-refresh nudge below would contradict the server
+    # that just said refreshing cannot succeed. Only when EVERY card is blocked
+    # is refreshing the wrong advice — with one collectable card the command
+    # still helps, and the blocked card is already marked in the list.
+    if all(card.get("blocked") for card in cards):
+        return f"Not updated: {listed}. These can't connect — check their credentials."
+    if all(card.get("days") is None for card in cards):
         return f"No usage fetched yet. Run '{_REFRESH_COMMAND}' to pull your data."
-    try:
-        # `fromisoformat` accepts the server's trailing "Z" directly.
-        fetched = datetime.fromisoformat(str(raw))
-    except ValueError:
-        # Unreadable stamp. Stay quiet rather than guess: the card HAS fetched,
-        # so the never-fetched copy would be false, and no age can be computed.
-        return None
-    if fetched.tzinfo is None:
-        fetched = fetched.replace(tzinfo=UTC)
-    age = (now or datetime.now(UTC)) - fetched
-    # Clock skew puts the stamp in the future, giving a negative age that reads
-    # as fresh — so the day count below can never come out negative.
-    if age <= STALE_AFTER:
-        return None
-    return (
-        f"Not updated in {age.days} days. "
-        f"Run '{_REFRESH_COMMAND}' for the latest numbers."
-    )
+    return f"Not updated: {listed}. Run '{_REFRESH_COMMAND}' for the latest numbers."
+
+
+def _stale_card_label(card: dict[str, Any]) -> str:
+    """``Anthropic (40 days)``, or ``AWS (never fetched, can't connect)``.
+
+    Spelled out rather than abbreviated: this line is read in a terminal or by a
+    model, neither of which is short of room, and "40d" invites a misread.
+    ``days`` of None means the card has never fetched — distinct from 0, which
+    would claim it fetched today.
+    """
+    days = card.get("days")
+    facts = ["never fetched" if days is None else f"{days} days"]
+    if card.get("blocked"):
+        facts.append("can't connect")
+    name = safe_text(card.get("display_name") or card.get("provider_id") or "")
+    return f"{name} ({', '.join(facts)})"
 
 
 def format_amount(summary: dict[str, Any]) -> str:

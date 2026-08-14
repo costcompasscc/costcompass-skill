@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
-
 from costcompass import render
 
 
@@ -169,87 +167,124 @@ def test_incomplete_note_agrees_in_number():
 
 # ---------- Stale-data reminder ----------
 #
-# The dashboard states the same rule in
-# frontend/src/lib/dashboard-derived.ts. The three "contract:" cases below are
-# the shared boundary and are named to match its tests exactly — grep the name
-# across both repos before changing either side.
+# Every judgement below is the server's: which cards are behind, how far, and
+# whether refreshing can fix them. The threshold and the day arithmetic live in
+# `UserProviderRepo.stale_cards`, and its boundary tests are the only ones in
+# the system — these cover this renderer's phrasing and nothing else. If you
+# came here to change when a card counts as stale, you are in the wrong repo.
 
-NOW = datetime(2026, 5, 19, 12, 0, 0, tzinfo=UTC)
 
-
-def _fetched(**delta) -> dict:
-    """A one-card summary whose newest fetch was `delta` ago."""
+def _card(**overrides) -> dict:
     return {
-        "enabled_provider_count": 1,
-        "newest_fetched_at": (NOW - timedelta(**delta)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "provider_id": "anthropic",
+        "instance_key": "",
+        "display_name": "Anthropic",
+        "days": 40,
+        "blocked": False,
+        **overrides,
     }
 
 
-def test_contract_2d59m_since_the_newest_fetch_is_silent():
-    assert render.staleness_note(_fetched(days=2, minutes=59), NOW) is None
+def _summary(*cards, enabled=None) -> dict:
+    return {
+        "enabled_provider_count": len(cards) if enabled is None else enabled,
+        "stale_cards": list(cards),
+    }
 
 
-def test_contract_3d01m_since_the_newest_fetch_warns():
-    note = render.staleness_note(_fetched(days=3, minutes=1), NOW)
-    assert note == (
-        "Not updated in 3 days. "
+def test_staleness_names_the_service_and_its_age():
+    """A name is the answer a wrong-looking total actually needs — "your data is
+    old" sends the user hunting through every card."""
+    assert render.staleness_note(_summary(_card())) == (
+        "Not updated: Anthropic (40 days). "
         "Run 'costcompass mtd refresh --vault' for the latest numbers."
     )
 
 
-def test_contract_every_enabled_card_unfetched_reports_never_fetched():
-    note = render.staleness_note(
-        {"enabled_provider_count": 2, "newest_fetched_at": None}, NOW
+def test_staleness_lists_every_card_without_truncating():
+    """The dashboard trims to three names because it renders beside a figure in
+    a fixed row. This output is read by a person or by the skill's model, and a
+    hidden remainder serves neither."""
+    cards = [_card(display_name=f"P{i}", days=40 - i) for i in range(5)]
+    note = render.staleness_note(_summary(*cards)) or ""
+    for i in range(5):
+        assert f"P{i} ({40 - i} days)" in note
+    assert "more" not in note
+
+
+def test_staleness_marks_a_blocked_card_in_the_list():
+    """Refresh fans out to every enabled card, so a card weeks behind has
+    usually already been tried and failed."""
+    note = render.staleness_note(_summary(_card(blocked=True))) or ""
+    assert "Anthropic (40 days, can't connect)" in note
+
+
+def test_staleness_changes_the_advice_when_every_card_is_blocked():
+    assert render.staleness_note(_summary(_card(blocked=True))) == (
+        "Not updated: Anthropic (40 days, can't connect). "
+        "These can't connect — check their credentials."
     )
+
+
+def test_staleness_still_suggests_refresh_when_one_card_is_collectable():
+    """One fixable card means the command still helps; the blocked one is
+    already marked in the list."""
+    note = render.staleness_note(
+        _summary(_card(display_name="Broken", blocked=True), _card(display_name="Old"))
+    )
+    assert note is not None and note.endswith(
+        "Run 'costcompass mtd refresh --vault' for the latest numbers."
+    )
+
+
+def test_staleness_says_cant_connect_when_the_first_fetch_is_what_failed():
+    """A mistyped key leaves a card with no age AND no way to get one. The
+    first-refresh nudge would contradict the server, which already said
+    refreshing cannot succeed."""
+    note = render.staleness_note(_summary(_card(days=None, blocked=True)))
+    assert note is not None
+    assert "can't connect" in note
+    assert "to pull your data" not in note
+
+
+def test_staleness_reports_never_fetched_when_no_card_has_an_age():
+    note = render.staleness_note(_summary(_card(days=None), _card(days=None)))
     assert note == (
         "No usage fetched yet. Run 'costcompass mtd refresh --vault' to pull your data."
     )
 
 
-def test_staleness_is_silent_at_exactly_three_days():
-    """The floor is "older than", not "at least" — the dashboard pins the same
-    boundary, and an off-by-one here makes the two surfaces disagree."""
-    assert render.staleness_note(_fetched(days=3), NOW) is None
+def test_staleness_spells_out_never_fetched_rather_than_zero_days():
+    """`None` days is not `0` — zero would claim the card fetched today."""
+    note = render.staleness_note(_summary(_card(days=None), _card(days=12))) or ""
+    assert "Anthropic (never fetched)" in note
 
 
-def test_staleness_floors_the_day_count():
-    assert "in 12 days" in (
-        render.staleness_note(_fetched(days=12, hours=23), NOW) or ""
+def test_staleness_falls_back_to_the_provider_id_without_a_display_name():
+    """A retired plugin still has ingested spend; an id beats a blank."""
+    note = render.staleness_note(_summary(_card(display_name=None))) or ""
+    assert "anthropic (40 days)" in note
+
+
+def test_staleness_strips_control_sequences_from_the_card_name():
+    """display_name is server-returned, not hardcoded — same untrusted-origin
+    text every other render.py call site runs through ``safe_text`` before
+    printing, so a malicious or corrupted catalog entry can't smuggle a
+    terminal escape sequence (cursor moves, title changes, OSC 8/52) into this
+    line."""
+    note = (
+        render.staleness_note(_summary(_card(display_name="\x1b[31mEvil\x1b[0m"))) or ""
     )
-
-
-def test_staleness_never_counts_below_three():
-    """No singular "1 day" case can arise, so the copy is safely always plural."""
-    assert "in 3 days" in (
-        render.staleness_note(_fetched(days=3, seconds=1), NOW) or ""
-    )
-
-
-def test_staleness_stays_quiet_on_an_unparseable_timestamp():
-    """The card HAS fetched, so the never-fetched copy would be false, and no
-    age can be computed from it. Say nothing rather than guess."""
-    note = render.staleness_note(
-        {"enabled_provider_count": 1, "newest_fetched_at": "not-a-date"}, NOW
-    )
-    assert note is None
-
-
-def test_staleness_treats_a_future_timestamp_as_fresh():
-    """Clock skew, not twelve-days-negative — the count can never go below zero."""
-    assert render.staleness_note(_fetched(days=-1), NOW) is None
+    assert "\x1b" not in note
+    assert "[31mEvil[0m (40 days)" in note
 
 
 def test_staleness_is_silent_with_no_enabled_cards():
     """Nothing in the CLI refreshes on its own, so telling a user with no cards
     to run refresh would not help them."""
-    assert (
-        render.staleness_note(
-            {"enabled_provider_count": 0, "newest_fetched_at": None}, NOW
-        )
-        is None
-    )
+    assert render.staleness_note(_summary(_card(), enabled=0)) is None
 
 
 def test_staleness_is_silent_against_an_older_server():
-    """A server predating the fields omits both — unchanged, silent output."""
-    assert render.staleness_note({"mtd_usd": 12.5}, NOW) is None
+    """A server predating the field omits it — unchanged, silent output."""
+    assert render.staleness_note({"mtd_usd": 12.5}) is None
