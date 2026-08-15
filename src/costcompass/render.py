@@ -7,6 +7,7 @@ command layer is responsible for printing them.
 from __future__ import annotations
 
 import re
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 # C0 + C1 control characters (includes ESC 0x1b, which starts every ANSI/CSI/OSC
@@ -42,8 +43,48 @@ _UNKNOWN_SURFACE_ORDER = 999
 _REFRESH_COMMAND = "costcompass mtd refresh --vault"
 
 
+#: Quantum for every money figure the CLI prints.
+_CENT = Decimal("0.01")
+
+
 def money(value: float) -> str:
-    return f"${value:,.2f}"
+    """Money for display, rounded to the nearest cent.
+
+    One of four implementations of a single rule — the web page
+    (``frontend/src/lib/format.ts``), the server-rendered PDF
+    (``backend/app/services/report_service.py``), the macOS menu bar
+    (``Formatters.formatUSDDisplay``) and this. A user running
+    ``costcompass mtd`` beside the dashboard is looking at two renderings of
+    one number, so any disagreement reads as a bug in the data.
+
+    Two details are load-bearing for that agreement, both about matching
+    JavaScript's ``toLocaleString`` on the web side:
+
+    * ``Decimal(str(value))`` rather than a bare ``f"{value:,.2f}"``. The
+      format spec rounds half-to-EVEN on the binary double, so it renders
+      ``$1.00`` for ``1.005`` and ``$2.67`` for ``2.675`` where every other
+      surface says ``$1.01`` and ``$2.68``.
+    * ``ROUND_HALF_UP``, ties away from zero, which is the rule the other
+      three use.
+
+    A positive amount that rounds to nothing reads "< $0.01" rather than
+    "$0.00" — printing a charge as no charge is the reading this exists to
+    prevent, and the sub-cent per-model rows on a metered card are exactly
+    where it bites. A negative that rounds to nothing drops its sign, and the
+    sign otherwise sits outside the "$", so a credit reads "-$1.50" and never
+    the "$-0.00" the old format spec could produce.
+
+    ASSUMPTION: the shared case table lives in
+    ``frontend/src/lib/money-display-cases.ts`` in the main repo, and
+    ``test_render.py`` carries a copy by hand. This CLI ships from its own
+    repo on its own cadence, so nothing mechanically pins the two — if that
+    table moves and this copy is not carried over, the suites stay green and
+    the CLI silently drifts from the dashboard again.
+    """
+    magnitude = Decimal(str(value)).copy_abs().quantize(_CENT, rounding=ROUND_HALF_UP)
+    if magnitude == 0:
+        return "< $0.01" if value > 0 else "$0.00"
+    return f"{'-' if value < 0 else ''}${magnitude:,.2f}"
 
 
 def incomplete_window_note(summary: dict[str, Any]) -> str | None:

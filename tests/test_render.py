@@ -1,11 +1,100 @@
 from __future__ import annotations
 
+import pytest
+
 from costcompass import render
 
 
 def test_money():
     assert render.money(1234.5) == "$1,234.50"
     assert render.money(0) == "$0.00"
+
+
+# The cross-implementation table. Its home is
+# `frontend/src/lib/money-display-cases.ts` in the main repo, where the web
+# suite and the server's `test_report_money_parity.py` both read it directly.
+# This CLI ships from its own repo on its own cadence, so the list is carried
+# over by hand rather than read — the same call the macOS app makes, and for
+# the same reason: a mechanical guard would fail this suite for a drift no
+# change here can fix.
+#
+# The point of the table is that `costcompass mtd` and the dashboard are two
+# renderings of one number. Every case below was a real disagreement between
+# some pair of the four surfaces.
+MONEY_DISPLAY_CASES = [
+    (0, "$0.00"),
+    # Sub-cent stays visible. The old `f"{v:,.2f}"` printed "$0.00" here,
+    # which reads as no charge at all — and per-model rows on a metered card
+    # are exactly where sub-cent amounts live.
+    (0.004, "< $0.01"),
+    (0.0049, "< $0.01"),
+    (0.005, "$0.01"),
+    (0.01, "$0.01"),
+    # Exact-looking halves. Each is a hair below the half as a float, yet all
+    # three round UP, because the rule is applied to the decimal
+    # representation and not to the binary value. These are the cases that
+    # fail if this goes back to a bare format spec, which rounds half-to-even
+    # on the binary double: it gives $0.01 / $1.00 / $2.67 for these three.
+    (0.015, "$0.02"),
+    (1.005, "$1.01"),
+    (2.675, "$2.68"),
+    (0.0553, "$0.06"),
+    # Floats sitting a hair below the exact cent — the truncation bug that
+    # made the PDF print $0.28 for $0.29.
+    (0.29, "$0.29"),
+    (0.57, "$0.57"),
+    (1.15, "$1.15"),
+    (1.999, "$2.00"),
+    (8.61, "$8.61"),
+    (57.86, "$57.86"),
+    (1234.5, "$1,234.50"),
+    (1234567.891, "$1,234,567.89"),
+    # Sign outside the "$", and a negative that rounds to nothing loses the
+    # sign rather than printing the "$-0.00" the old format spec produced.
+    (-1.5, "-$1.50"),
+    (-0.001, "$0.00"),
+]
+
+
+@pytest.mark.parametrize(("value", "expected"), MONEY_DISPLAY_CASES)
+def test_money_matches_the_other_surfaces(value, expected):
+    assert render.money(value) == expected
+
+
+def test_no_positive_amount_ever_prints_as_zero():
+    """Any positive amount renders either a real figure or "< $0.01".
+
+    There is no third outcome. Walking the sub-cent boundary catches a gap
+    reopening between the rounding and whatever decides the "< $0.01" case —
+    the failure the macOS copy actually had, where a hand-written threshold
+    and the rounding disagreed at exactly one value.
+    """
+    for step in range(1, 201):
+        value = step * 0.0001
+        assert render.money(value) != "$0.00", f"{value} rendered as no spend"
+
+
+def test_breakdown_column_widens_for_a_sub_cent_row():
+    """A sub-cent token is 7 characters where "$0.00" is 5, and the column is
+    sized from the formatted strings — so the alignment must follow it rather
+    than letting the token overflow its field and skew the table."""
+    out = render.format_breakdown(
+        [
+            {"display_name": "Anthropic", "cost_usd": 12.5},
+            {"display_name": "Atlas Cloud", "cost_usd": 0.004},
+        ]
+    )
+    assert "< $0.01" in out
+    lines = out.split("\n")
+    # The amount field is right-justified, so leading padding differs per row
+    # by design. What must hold is that the field is ONE width for everyone —
+    # so every name starts at the same column, and the rule spans that width.
+    name_columns = {
+        line.index(name) for line, name in zip(lines, ["Anthropic", "Atlas Cloud"])
+    }
+    assert len(name_columns) == 1, out
+    rule = next(line for line in lines if set(line.strip()) == {"-"})
+    assert len(rule.strip()) == len("< $0.01"), out
 
 
 def test_format_amount():
