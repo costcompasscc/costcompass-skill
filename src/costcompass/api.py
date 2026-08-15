@@ -6,11 +6,15 @@ The underlying ``httpx.Client`` is injectable so tests can supply an
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import httpx
 
 from . import user_agent
+
+#: Gap before the single finalize replay, in seconds.
+FINALIZE_RETRY_DELAY_S = 1.0
 
 
 class ApiError(Exception):
@@ -25,6 +29,30 @@ class ApiError(Exception):
     def __init__(self, message: str, *, status: int | None = None) -> None:
         super().__init__(message)
         self.status = status
+
+
+def _is_ambiguous_failure(exc: ApiError) -> bool:
+    """Whether a failed mutation could still have committed server-side.
+
+    The CLI's port of the browser's ``isAmbiguousMutationFailure``
+    (``frontend/src/lib/idempotency.ts``). Ambiguous means the server may
+    have acted: no response at all, or a status it could return after the
+    commit. Definite means it answered before mutating, or never saw the
+    request.
+
+    ``status is None`` covers the connectivity failures ``_request`` maps
+    from ``httpx.RequestError`` — a request that never got a status line
+    cannot rule the commit out.
+    """
+    if exc.status is None:
+        return True
+    if exc.status in (408, 502, 503, 504):
+        return True
+    # The rate limiter answers before the handler runs, so nothing was
+    # written; retrying would only burn another token.
+    if exc.status == 429:
+        return False
+    return exc.status >= 500
 
 
 class VaultRevisionConflict(ApiError):
@@ -183,6 +211,33 @@ class Client:
         return self._json("POST", f"/fetch-runs/{run_id}/responses", json=payload)
 
     def finalize_run(self, run_id: str, cancelled: bool = False) -> dict[str, Any]:
-        return self._json(
-            "POST", f"/fetch-runs/{run_id}/finalize", json={"cancelled": cancelled}
-        )
+        """Close the run, retrying once when the outcome is unknown.
+
+        Re-finalizing is idempotent server-side: an already-terminal run
+        returns its recorded outcome rather than 409, and a flipped
+        ``cancelled`` cannot rewrite it. That is what makes the retry
+        safe — but safe is not the same as done. A relay that never
+        retries still reports a lost response as a failed run, so the
+        retry is the half that reaches the user.
+
+        Bounded at one replay, on an ambiguous failure only: no response
+        at all, or a status the server could have returned after the
+        commit. A definite 4xx still fails — a 404 means this relay is
+        finalizing an id the server does not have, which is a defect
+        worth surfacing rather than repeating.
+
+        Ported from the browser's
+        ``frontend/src/lib/refresh/fetch-runs-api.ts::finalizeFetchRun``;
+        the third relay is
+        ``client/macos/…/API/APIClient.swift::finalizeRun``. Deliberately
+        not a ``LOCKSTEP:`` file header — that marker claims the whole
+        file has ports, and these three are siblings only here.
+        """
+        path = f"/fetch-runs/{run_id}/finalize"
+        try:
+            return self._json("POST", path, json={"cancelled": cancelled})
+        except ApiError as exc:
+            if not _is_ambiguous_failure(exc):
+                raise
+            time.sleep(FINALIZE_RETRY_DELAY_S)
+            return self._json("POST", path, json={"cancelled": cancelled})

@@ -970,8 +970,15 @@ def _run(
                     # Status only, never the error text — the same rule the two
                     # sibling relays follow, and the status is also the part
                     # worth having: a 502/504 is the gateway being down, while a
-                    # 409 or 404 means this relay finalized a run twice or
-                    # against an id the server does not have, which is a defect.
+                    # 404 means this relay finalized against an id the server
+                    # does not have, which is a defect.
+                    #
+                    # A 409 no longer appears here. Re-finalizing is idempotent
+                    # — an already-terminal run replays its recorded outcome —
+                    # so a second finalize is a successful no-op rather than an
+                    # error. ``Client.finalize_run`` relies on that to retry
+                    # once when the outcome is unknown, which is why reaching
+                    # this branch now means the run really is unfinalized.
                     # No newline before it: the sink strips control characters,
                     # ``\n`` among them, so the sentences run together anyway.
                     detail = (
