@@ -163,13 +163,13 @@ def test_js_string_matches_browser_number_notation():
 
 def test_non_standard_json_constants_make_the_body_unparseable():
     # CPython's json accepts bare Infinity/-Infinity/NaN; JSON.parse rejects
-    # them, so the browser reference falls into its catch and every binding
-    # from that body becomes "". Match it, rather than extracting an "inf"
-    # no other relay can produce.
+    # them, so the browser reference falls into its catch. Match it, rather
+    # than extracting an "inf" no other relay can produce — and report the
+    # failure rather than binding "" for every rule.
     for literal in ("Infinity", "-Infinity", "NaN"):
         bindings: dict[str, str] = {}
         body = base64.b64encode(f'{{"n": {literal}, "jobId": "abc"}}'.encode()).decode()
-        program._apply_extract(
+        ok = program._apply_extract(
             [
                 {"path": "n", "as_binding": "n"},
                 {"path": "jobId", "as_binding": "jobId"},
@@ -177,9 +177,169 @@ def test_non_standard_json_constants_make_the_body_unparseable():
             body,
             bindings,
         )
-        # Not just the offending value — the WHOLE body is unparseable,
-        # so the sibling binding is empty too.
-        assert bindings == {"n": "", "jobId": ""}, literal
+        # Not just the offending value — the WHOLE body is unreadable, and
+        # bindings are left untouched rather than filled with "".
+        assert ok is False, literal
+        assert bindings == {}, literal
+
+
+def test_apply_extract_leaves_bindings_untouched_on_a_non_json_body():
+    bindings = {"prior": "kept"}
+    body = base64.b64encode(b"<html>not json</html>").decode()
+    ok = program._apply_extract([{"path": "a", "as_binding": "a"}], body, bindings)
+    assert ok is False
+    assert bindings == {"prior": "kept"}
+
+
+def test_apply_extract_with_no_rules_tolerates_a_non_json_body():
+    bindings: dict[str, str] = {}
+    body = base64.b64encode(b"<html>not json</html>").decode()
+    assert program._apply_extract([], body, bindings) is True
+    assert bindings == {}
+
+
+def test_apply_extract_binds_empty_for_an_absent_path():
+    # google's `pageToken` and atlascloud's `next_page` are legitimately
+    # absent on the last page. Only an unreadable BODY is an error.
+    bindings: dict[str, str] = {}
+    body = base64.b64encode(b'{"present": "x"}').decode()
+    ok = program._apply_extract(
+        [{"path": "pageToken", "as_binding": "page"}], body, bindings
+    )
+    assert ok is True
+    assert bindings == {"page": ""}
+
+
+def _poll_only_program(bindings, require_bindings):
+    """A single poll step; bindings and require_bindings are the knobs."""
+    return {
+        "purpose": "billing",
+        "bindings": bindings,
+        "steps": [
+            {
+                "kind": "poll",
+                "request": {
+                    "host": "bq",
+                    "path": "/pages",
+                    "method": "GET",
+                    "query": {"cursor": "{cursor}"},
+                    "headers": {},
+                    "purpose": "billing",
+                },
+                "until": {"any_of": [{"kind": "truthy", "binding": "more"}]},
+                "extract": [
+                    {"path": "has_more", "as_binding": "more", "coerce": "bool"},
+                    {"path": "next_page", "as_binding": "cursor"},
+                ],
+                "require_bindings": require_bindings,
+                "deadline_ms": 90_000,
+                "max_iterations": 64,
+                "stop_on_status_gte": 400,
+            }
+        ],
+    }
+
+
+def _error_detail(resp):
+    return json.loads(base64.b64decode(resp["body_b64"]))["error"]
+
+
+def test_require_binding_missing_emits_502_and_never_forwards():
+    broker = FakeBroker([])  # any forward would raise
+    out = program.run_program(
+        _poll_only_program({"more": "true"}, ["cursor"]), {}, "tok", broker
+    )
+    assert broker.requests == []
+    assert len(out) == 1
+    assert out[0]["status"] == 502
+    assert out[0].get("signature") is None
+    assert not out[0].get("synthetic")
+    assert _error_detail(out[0]) == "required binding missing: cursor"
+
+
+def test_require_binding_names_the_first_missing_in_declaration_order():
+    broker = FakeBroker([])
+    out = program.run_program(
+        _poll_only_program({"more": "true", "b": "set"}, ["a", "b", "c"]),
+        {},
+        "tok",
+        broker,
+    )
+    assert _error_detail(out[0]) == "required binding missing: a"
+
+
+def test_require_binding_cleared_mid_loop_still_emits_502():
+    # atlascloud's truncation shape: page 1 hands back a cursor, page 2 still
+    # claims has_more but omits it. The check must fire on iteration N.
+    broker = FakeBroker(
+        [
+            env(200, {"has_more": True, "next_page": "p2"}),
+            env(200, {"has_more": True}),
+        ]
+    )
+    out = program.run_program(
+        _poll_only_program({"more": "true", "cursor": "p1"}, ["cursor"]),
+        {},
+        "tok",
+        broker,
+    )
+    assert len(broker.requests) == 2  # both pages fetched, then the cursor is gone
+    assert len(out) == 3  # two relayed pages + the error
+    assert out[2]["status"] == 502
+    assert _error_detail(out[2]) == "required binding missing: cursor"
+
+
+def test_undecodable_body_emits_502_and_terminates_before_the_next_step():
+    prog = {
+        "purpose": "billing",
+        "bindings": {},
+        "steps": [
+            {
+                "kind": "request",
+                "request": {
+                    "host": "bq",
+                    "path": "/q",
+                    "method": "POST",
+                    "query": {},
+                    "headers": {},
+                    "purpose": "billing",
+                },
+                "extract": [{"path": "jobId", "as_binding": "jobId"}],
+                "stop_on_status_gte": 400,
+            },
+            {
+                "kind": "request",
+                "request": {
+                    "host": "bq",
+                    "path": "/never",
+                    "method": "GET",
+                    "query": {},
+                    "headers": {},
+                    "purpose": "billing",
+                },
+                "extract": [],
+                "stop_on_status_gte": 400,
+            },
+        ],
+    }
+    broker = FakeBroker(
+        [
+            {
+                "status": 200,
+                "headers": {},
+                "body": base64.b64encode(b"<html>not json</html>").decode(),
+                "signature": "s",
+            }
+        ]
+    )
+    out = program.run_program(prog, {}, "tok", broker)
+
+    assert len(broker.requests) == 1  # the second step never ran
+    assert len(out) == 2  # the relayed 200, then the error
+    assert out[0]["status"] == 200
+    assert out[0]["signature"] == "s"  # still relayed verbatim
+    assert out[1]["status"] == 502
+    assert _error_detail(out[1]) == "extract: response body is not JSON"
 
 
 def test_exponent_overflow_matches_browser_infinity():

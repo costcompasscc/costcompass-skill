@@ -107,8 +107,27 @@ def _run_poll_step(
     while True:
         if not _should_continue(step["until"], bindings):
             return "continue"
-        if any((bindings.get(b) or "") == "" for b in require_bindings):
-            return "continue"
+        # `require_bindings` is the step's declaration of what it CANNOT poll
+        # without. Missing one is a failure to read what an earlier step
+        # promised — google's `jobs.query` answering 200 with no
+        # `jobReference.jobId`, or atlascloud paging that claims `has_more`
+        # and then omits the cursor. Both truncate the window silently, so
+        # this must not be a clean stop: `skipped` reads as healthy, and a run
+        # that polled nothing has to be visible. Position matters — after
+        # `until` (a satisfied loop wants no bindings) and before
+        # `max_iterations`.
+        missing = next(
+            (b for b in require_bindings if (bindings.get(b) or "") == ""), None
+        )
+        if missing is not None:
+            out.append(
+                provider_error_response(
+                    502,
+                    program.get("purpose", ""),
+                    f"required binding missing: {missing}",
+                )
+            )
+            return "terminate"
         if iterations >= max_iterations:
             return "continue"
         if now() - loop_start > deadline_ms:
@@ -174,7 +193,16 @@ def _forward_and_extract(
     out.append(relayed)
     if relayed["status"] >= stop_gte:
         return "terminate"
-    _apply_extract(extract, relayed["body_b64"], bindings)
+    if not _apply_extract(extract, relayed["body_b64"], bindings):
+        # A 2xx we declared extract rules against, whose body will not decode.
+        # Continuing would forward later steps against empty bindings and land
+        # a green card holding no data; fail loudly instead.
+        out.append(
+            provider_error_response(
+                502, program.get("purpose", ""), "extract: response body is not JSON"
+            )
+        )
+        return "terminate"
     return "continue"
 
 
@@ -230,22 +258,40 @@ def _reject_json_constant(name: str) -> Any:
 
 def _apply_extract(
     rules: list[dict[str, Any]], body_b64: str, bindings: dict[str, str]
-) -> None:
+) -> bool:
+    """Apply a step's extract rules, mutating ``bindings``. Returns ``False``
+    when the body could not be decoded at all — the caller turns that into a
+    provider-error and stops.
+
+    A body we cannot read is NOT the same as a field that happens to be
+    absent. An absent path still binds ``""`` (google's ``pageToken`` and
+    atlascloud's ``next_page`` are legitimately absent on the last page);
+    ``require_bindings`` is where a step declares what it actually needs.
+    Writing ``""`` for every rule off an unreadable body conflated the two and
+    let a program walk every step, extract nothing, and finish green.
+
+    ``bindings`` is left UNTOUCHED on failure. That is safe only because every
+    caller terminates the run on ``False`` — nothing in the signature enforces
+    the coupling. ASSUMPTION: a decode failure is always terminal. If that ever
+    stops being true, the loop resumes against bindings still holding the
+    PREVIOUS iteration's values, and the next request goes out with a stale
+    cursor rather than an empty one — a wrong page silently ingested, not a
+    visible failure. Clear the rules' bindings here before relaxing it.
+    """
     if not rules:
-        return
+        return True
     try:
         parsed: Any = json.loads(
             base64.b64decode(body_b64).decode("utf-8"),
             # CPython accepts bare `Infinity`/`-Infinity`/`NaN` as a
             # non-standard extension; `JSON.parse` REJECTS them, so the
-            # browser reference treats such a body as unparseable and every
-            # binding from it becomes "". Raise to land in the same `except`
-            # and match, instead of extracting an "inf" no other relay can
-            # produce.
+            # browser reference treats such a body as unparseable. Raise to
+            # land in the same `except` and route to the same provider-error,
+            # instead of extracting an "inf" no other relay can produce.
             parse_constant=_reject_json_constant,
         )
     except (ValueError, UnicodeDecodeError):
-        parsed = {}
+        return False
     for rule in rules:
         raw = _read_dotted_path(parsed, rule["path"])
         if rule.get("coerce") == "bool":
@@ -253,6 +299,7 @@ def _apply_extract(
         else:
             value = _js_string(raw)
         bindings[rule["as_binding"]] = value
+    return True
 
 
 def _js_string(raw: Any) -> str:

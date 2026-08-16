@@ -769,6 +769,283 @@
           }
         ]
       }
+    },
+    {
+      "name": "extract-undecodable-body",
+      "_comment": "A 2xx whose body is valid base64 of non-JSON, on a step declaring extract rules. The relayed 200 is still emitted verbatim, then a 502 provider-error terminates the run: the second step must never forward. Guards the silent `parsed = {}` fallback that used to write '' per rule.",
+      "auth_headers": {},
+      "signing_token": "tok",
+      "program": {
+        "purpose": "billing",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/q",
+              "method": "POST",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing",
+              "req_sig": "sig"
+            },
+            "extract": [
+              {
+                "path": "jobId",
+                "as_binding": "jobId",
+                "coerce": "string"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/never",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing"
+            },
+            "extract": [],
+            "stop_on_status_gte": 400
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "PGh0bWw+bm90IGpzb248L2h0bWw+",
+          "signature": "s"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "POST",
+            "host": "bq",
+            "path": "/q",
+            "query": "",
+            "headers": {},
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": "sig"
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://bq/q",
+            "request_purpose": "billing",
+            "body_b64": "PGh0bWw+bm90IGpzb248L2h0bWw+",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "provider_error",
+            "status": 502,
+            "error": "extract: response body is not JSON",
+            "synthetic": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "require-binding-missing",
+      "_comment": "A poll step whose require_bindings was never seeded, with `until` satisfied. Zero forwards, and a 502 naming the binding — this used to be a clean stop that emitted nothing at all, finishing the card green.",
+      "auth_headers": {},
+      "signing_token": "tok",
+      "program": {
+        "purpose": "billing",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "poll",
+            "request": {
+              "host": "bq",
+              "path": "/jobs/{jobId}",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing"
+            },
+            "until": {
+              "any_of": [
+                {
+                  "kind": "falsey",
+                  "binding": "done"
+                }
+              ]
+            },
+            "extract": [
+              {
+                "path": "done",
+                "as_binding": "done",
+                "coerce": "bool"
+              }
+            ],
+            "require_bindings": [
+              "jobId"
+            ],
+            "deadline_ms": 90000,
+            "max_iterations": 64,
+            "stop_on_status_gte": 400
+          }
+        ]
+      },
+      "broker_script": [],
+      "expect": {
+        "requests": [],
+        "responses": [
+          {
+            "kind": "provider_error",
+            "status": 502,
+            "error": "required binding missing: jobId",
+            "synthetic": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "require-binding-cleared-mid-loop",
+      "_comment": "atlascloud's truncation shape: page 1 hands back a cursor, page 2 still claims has_more but omits it. Proves the require_bindings check fires on iteration N, not only on entry — both pages relay, then a 502.",
+      "auth_headers": {},
+      "signing_token": "tok",
+      "program": {
+        "purpose": "billing",
+        "bindings": {
+          "more": "true",
+          "cursor": "p1"
+        },
+        "steps": [
+          {
+            "kind": "poll",
+            "request": {
+              "host": "bq",
+              "path": "/pages",
+              "method": "GET",
+              "query": {
+                "cursor": "{cursor}"
+              },
+              "headers": {},
+              "body": null,
+              "purpose": "billing"
+            },
+            "until": {
+              "any_of": [
+                {
+                  "kind": "truthy",
+                  "binding": "more"
+                }
+              ]
+            },
+            "extract": [
+              {
+                "path": "has_more",
+                "as_binding": "more",
+                "coerce": "bool"
+              },
+              {
+                "path": "next_page",
+                "as_binding": "cursor",
+                "coerce": "string"
+              }
+            ],
+            "require_bindings": [
+              "cursor"
+            ],
+            "deadline_ms": 90000,
+            "max_iterations": 64,
+            "stop_on_status_gte": 400
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "eyJoYXNfbW9yZSI6dHJ1ZSwibmV4dF9wYWdlIjoicDIifQ==",
+          "signature": "s1"
+        },
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "eyJoYXNfbW9yZSI6dHJ1ZX0=",
+          "signature": "s2"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "GET",
+            "host": "bq",
+            "path": "/pages",
+            "query": "cursor=p1",
+            "headers": {},
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          },
+          {
+            "method": "GET",
+            "host": "bq",
+            "path": "/pages",
+            "query": "cursor=p2",
+            "headers": {},
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://bq/pages?cursor=p1",
+            "request_purpose": "billing",
+            "body_b64": "eyJoYXNfbW9yZSI6dHJ1ZSwibmV4dF9wYWdlIjoicDIifQ==",
+            "signature": "s1",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://bq/pages?cursor=p2",
+            "request_purpose": "billing",
+            "body_b64": "eyJoYXNfbW9yZSI6dHJ1ZX0=",
+            "signature": "s2",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "provider_error",
+            "status": 502,
+            "error": "required binding missing: cursor",
+            "synthetic": false
+          }
+        ]
+      }
     }
   ]
 }
