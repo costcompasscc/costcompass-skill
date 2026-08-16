@@ -198,6 +198,81 @@ def test_apply_extract_with_no_rules_tolerates_a_non_json_body():
     assert bindings == {}
 
 
+# Every input the three relays used to DISAGREE on, plus the one they always
+# agreed on. Each is now rejected by all three under the shared decode contract
+# (`program._decode_body_strict`), and `tests/vectors/relay/program.json`
+# carries the same set so the ports cannot drift apart again.
+#
+# The old-behaviour note is what makes each case worth its line — a case all
+# three already rejected (`!!!not-base64!!!`) pins nothing, which is exactly
+# why the one pre-existing invalid-base64 test anywhere in the three relays
+# (macOS's, using that string) could not catch this bug.
+#
+# SCOPE: these assert INTERPRETER OUTPUT, not the end-to-end outcome, and the
+# two diverge for the base64-invalid rows. There the relayed response queued
+# alongside the 502 carries the malformed body verbatim, so ``RawResponseIn``
+# 422s the whole ``/responses`` batch and the server never reads the
+# provider-error; the entry lands on its ``failed`` fallback instead. Still a
+# red card, different route. That ordering predates this contract — do not
+# "fix" it by weakening these assertions.
+OUTSIDE_THE_DECODE_CONTRACT = [
+    ("e30=!!", "excess data after padding — THIS relay accepted, atob/Swift rejected"),
+    ("e3 0=", "embedded space — THIS relay and atob accepted, Swift rejected"),
+    ("e30", "unpadded — only the browser accepted"),
+    ("e30==", "over-padded — THIS relay and Swift accepted, atob rejected"),
+    ("!!!not-base64!!!", "all three already rejected — the control case"),
+    ("eyJhIjoi/yJ9", '{"a":"<0xFF>"} — the browser bound U+FFFD and kept going'),
+    ("eyJhIjoiXHVkODAwIn0=", "lone \\ud800 escape — Swift cannot represent one"),
+    ("eyJhIjoiASJ9", "raw 0x01 in a string — only Swift accepted (RFC 8259 §7)"),
+    ("77u/e30=", "leading BOM — only the browser accepted"),
+    # Not a relay divergence — a near-miss in the GUARD. Python's `$`
+    # also matches before a trailing newline, so the obvious spelling of
+    # _CANONICAL_BASE64 accepted this while the browser and Swift
+    # rejected it, recreating the very divergence the guard removes.
+    ("e30=\n", "trailing newline — `$` would accept it, `\\Z` does not"),
+]
+
+
+@pytest.mark.parametrize("body,why", OUTSIDE_THE_DECODE_CONTRACT)
+def test_apply_extract_refuses_bodies_outside_the_decode_contract(body, why):
+    bindings = {"prior": "kept"}
+    ok = program._apply_extract([{"path": "a", "as_binding": "a"}], body, bindings)
+    assert ok is False, why
+    assert bindings == {"prior": "kept"}, why  # untouched, as on any decode failure
+
+
+def test_apply_extract_accepts_the_one_canonical_spelling():
+    # `e30=` is the single row of the divergence matrix every relay always
+    # agreed on, and the only one the App Server's own
+    # `b64decode(validate=True)` accepts. Guards against "fixing" the
+    # divergence by making everything fail.
+    bindings: dict[str, str] = {}
+    assert program._apply_extract([{"path": "a", "as_binding": "a"}], "e30=", bindings)
+    assert bindings == {"a": ""}  # absent path binds "", which is not a failure
+
+
+def test_apply_extract_refuses_a_body_past_the_depth_cap_without_crashing():
+    # Before the cap this raised RecursionError — which is NOT a ValueError, so
+    # it escaped `_apply_extract`'s except and killed the process. macOS was
+    # worse still (an uncatchable SIGSEGV in its recursive-descent parser).
+    # That this merely returns False is the whole point of the test.
+    deep = base64.b64encode(b"[" * 50_000 + b"]" * 50_000).decode()
+    bindings: dict[str, str] = {}
+    ok = program._apply_extract([{"path": "a", "as_binding": "a"}], deep, bindings)
+    assert ok is False
+    assert bindings == {}
+
+
+def test_depth_scan_does_not_count_brackets_inside_a_string():
+    # The scan must not count string CONTENT — a provider error message full of
+    # `[` is a legitimate body, and rejecting it would turn this guard into its
+    # own outage.
+    noisy = base64.b64encode(json.dumps({"a": "[" * 200}).encode()).decode()
+    bindings: dict[str, str] = {}
+    assert program._apply_extract([{"path": "a", "as_binding": "a"}], noisy, bindings)
+    assert bindings == {"a": "[" * 200}
+
+
 def test_apply_extract_binds_empty_for_an_absent_path():
     # google's `pageToken` and atlascloud's `next_page` are legitimately
     # absent on the last page. Only an unreadable BODY is an error.

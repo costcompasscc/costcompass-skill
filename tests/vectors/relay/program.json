@@ -1046,6 +1046,1146 @@
           }
         ]
       }
+    },
+    {
+      "name": "decode-base64-excess-after-padding",
+      "_comment": "One decode contract for body_b64 (invariant 13). Each vector below is an input the three relays used to DISAGREE on, so each pins agreement the old corpus could not: its only invalid-body vector was valid-base64-of-non-JSON, and the only invalid-base64 test anywhere (macOS's) used '!!!not-base64!!!' -- the single input all three already rejected. Contract = the App Server's own b64decode(validate=True), plus strict UTF-8, no BOM, no lone surrogate, and a depth cap. 'e30=!!': accepted by the CLI, rejected by atob and Swift.",
+      "auth_headers": {},
+      "signing_token": "tok",
+      "program": {
+        "purpose": "billing",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/q",
+              "method": "POST",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing",
+              "req_sig": "sig"
+            },
+            "extract": [
+              {
+                "path": "jobId",
+                "as_binding": "jobId",
+                "coerce": "string"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/never",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing"
+            },
+            "extract": [],
+            "stop_on_status_gte": 400
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "e30=!!",
+          "signature": "s"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "POST",
+            "host": "bq",
+            "path": "/q",
+            "query": "",
+            "headers": {},
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": "sig"
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://bq/q",
+            "request_purpose": "billing",
+            "body_b64": "e30=!!",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "provider_error",
+            "status": 502,
+            "error": "extract: response body is not JSON",
+            "synthetic": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "decode-base64-embedded-space",
+      "_comment": "One decode contract for body_b64 (invariant 13). Each vector below is an input the three relays used to DISAGREE on, so each pins agreement the old corpus could not: its only invalid-body vector was valid-base64-of-non-JSON, and the only invalid-base64 test anywhere (macOS's) used '!!!not-base64!!!' -- the single input all three already rejected. Contract = the App Server's own b64decode(validate=True), plus strict UTF-8, no BOM, no lone surrogate, and a depth cap. 'e3 0=': accepted by atob (forgiving-base64 strips whitespace) and the CLI, rejected by Swift.",
+      "auth_headers": {},
+      "signing_token": "tok",
+      "program": {
+        "purpose": "billing",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/q",
+              "method": "POST",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing",
+              "req_sig": "sig"
+            },
+            "extract": [
+              {
+                "path": "jobId",
+                "as_binding": "jobId",
+                "coerce": "string"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/never",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing"
+            },
+            "extract": [],
+            "stop_on_status_gte": 400
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "e3 0=",
+          "signature": "s"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "POST",
+            "host": "bq",
+            "path": "/q",
+            "query": "",
+            "headers": {},
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": "sig"
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://bq/q",
+            "request_purpose": "billing",
+            "body_b64": "e3 0=",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "provider_error",
+            "status": 502,
+            "error": "extract: response body is not JSON",
+            "synthetic": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "decode-base64-unpadded",
+      "_comment": "One decode contract for body_b64 (invariant 13). Each vector below is an input the three relays used to DISAGREE on, so each pins agreement the old corpus could not: its only invalid-body vector was valid-base64-of-non-JSON, and the only invalid-base64 test anywhere (macOS's) used '!!!not-base64!!!' -- the single input all three already rejected. Contract = the App Server's own b64decode(validate=True), plus strict UTF-8, no BOM, no lone surrogate, and a depth cap. 'e30': accepted only by the browser.",
+      "auth_headers": {},
+      "signing_token": "tok",
+      "program": {
+        "purpose": "billing",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/q",
+              "method": "POST",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing",
+              "req_sig": "sig"
+            },
+            "extract": [
+              {
+                "path": "jobId",
+                "as_binding": "jobId",
+                "coerce": "string"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/never",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing"
+            },
+            "extract": [],
+            "stop_on_status_gte": 400
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "e30",
+          "signature": "s"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "POST",
+            "host": "bq",
+            "path": "/q",
+            "query": "",
+            "headers": {},
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": "sig"
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://bq/q",
+            "request_purpose": "billing",
+            "body_b64": "e30",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "provider_error",
+            "status": 502,
+            "error": "extract: response body is not JSON",
+            "synthetic": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "decode-base64-over-padded",
+      "_comment": "One decode contract for body_b64 (invariant 13). Each vector below is an input the three relays used to DISAGREE on, so each pins agreement the old corpus could not: its only invalid-body vector was valid-base64-of-non-JSON, and the only invalid-base64 test anywhere (macOS's) used '!!!not-base64!!!' -- the single input all three already rejected. Contract = the App Server's own b64decode(validate=True), plus strict UTF-8, no BOM, no lone surrogate, and a depth cap. 'e30==': accepted by the CLI and Swift, rejected by atob. Proof there is no strictness ORDERING between the three.",
+      "auth_headers": {},
+      "signing_token": "tok",
+      "program": {
+        "purpose": "billing",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/q",
+              "method": "POST",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing",
+              "req_sig": "sig"
+            },
+            "extract": [
+              {
+                "path": "jobId",
+                "as_binding": "jobId",
+                "coerce": "string"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/never",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing"
+            },
+            "extract": [],
+            "stop_on_status_gte": 400
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "e30==",
+          "signature": "s"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "POST",
+            "host": "bq",
+            "path": "/q",
+            "query": "",
+            "headers": {},
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": "sig"
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://bq/q",
+            "request_purpose": "billing",
+            "body_b64": "e30==",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "provider_error",
+            "status": 502,
+            "error": "extract: response body is not JSON",
+            "synthetic": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "decode-utf8-invalid-byte",
+      "_comment": "One decode contract for body_b64 (invariant 13). Each vector below is an input the three relays used to DISAGREE on, so each pins agreement the old corpus could not: its only invalid-body vector was valid-base64-of-non-JSON, and the only invalid-base64 test anywhere (macOS's) used '!!!not-base64!!!' -- the single input all three already rejected. Contract = the App Server's own b64decode(validate=True), plus strict UTF-8, no BOM, no lone surrogate, and a depth cap. {\"a\":\"<0xFF>\"} -- structurally valid JSON carrying one bad UTF-8 byte. The browser's non-fatal TextDecoder yielded U+FFFD and BOUND it; the other two failed. The sharpest row: a wrong cursor substituted into an unguarded query value.",
+      "auth_headers": {},
+      "signing_token": "tok",
+      "program": {
+        "purpose": "billing",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/q",
+              "method": "POST",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing",
+              "req_sig": "sig"
+            },
+            "extract": [
+              {
+                "path": "jobId",
+                "as_binding": "jobId",
+                "coerce": "string"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/never",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing"
+            },
+            "extract": [],
+            "stop_on_status_gte": 400
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "eyJhIjoi/yJ9",
+          "signature": "s"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "POST",
+            "host": "bq",
+            "path": "/q",
+            "query": "",
+            "headers": {},
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": "sig"
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://bq/q",
+            "request_purpose": "billing",
+            "body_b64": "eyJhIjoi/yJ9",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "provider_error",
+            "status": 502,
+            "error": "extract: response body is not JSON",
+            "synthetic": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "decode-lone-surrogate-escape",
+      "_comment": "One decode contract for body_b64 (invariant 13). Each vector below is an input the three relays used to DISAGREE on, so each pins agreement the old corpus could not: its only invalid-body vector was valid-base64-of-non-JSON, and the only invalid-base64 test anywhere (macOS's) used '!!!not-base64!!!' -- the single input all three already rejected. Contract = the App Server's own b64decode(validate=True), plus strict UTF-8, no BOM, no lone surrogate, and a depth cap. {\"a\":\"\\ud800\"} -- an unpaired surrogate escape. JSON.parse and CPython both accept it; a Swift String cannot REPRESENT one, so reject is the only contract all three can implement.",
+      "auth_headers": {},
+      "signing_token": "tok",
+      "program": {
+        "purpose": "billing",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/q",
+              "method": "POST",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing",
+              "req_sig": "sig"
+            },
+            "extract": [
+              {
+                "path": "jobId",
+                "as_binding": "jobId",
+                "coerce": "string"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/never",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing"
+            },
+            "extract": [],
+            "stop_on_status_gte": 400
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "eyJhIjoiXHVkODAwIn0=",
+          "signature": "s"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "POST",
+            "host": "bq",
+            "path": "/q",
+            "query": "",
+            "headers": {},
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": "sig"
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://bq/q",
+            "request_purpose": "billing",
+            "body_b64": "eyJhIjoiXHVkODAwIn0=",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "provider_error",
+            "status": 502,
+            "error": "extract: response body is not JSON",
+            "synthetic": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "decode-raw-control-character",
+      "_comment": "One decode contract for body_b64 (invariant 13). Each vector below is an input the three relays used to DISAGREE on, so each pins agreement the old corpus could not: its only invalid-body vector was valid-base64-of-non-JSON, and the only invalid-base64 test anywhere (macOS's) used '!!!not-base64!!!' -- the single input all three already rejected. Contract = the App Server's own b64decode(validate=True), plus strict UTF-8, no BOM, no lone surrogate, and a depth cap. {\"a\":\"<0x01>\"} -- an unescaped control character. RFC 8259 section 7 forbids it; the browser and CLI already rejected it and only Swift accepted, so this one was fixed in the Swift parser.",
+      "auth_headers": {},
+      "signing_token": "tok",
+      "program": {
+        "purpose": "billing",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/q",
+              "method": "POST",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing",
+              "req_sig": "sig"
+            },
+            "extract": [
+              {
+                "path": "jobId",
+                "as_binding": "jobId",
+                "coerce": "string"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/never",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing"
+            },
+            "extract": [],
+            "stop_on_status_gte": 400
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "eyJhIjoiASJ9",
+          "signature": "s"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "POST",
+            "host": "bq",
+            "path": "/q",
+            "query": "",
+            "headers": {},
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": "sig"
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://bq/q",
+            "request_purpose": "billing",
+            "body_b64": "eyJhIjoiASJ9",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "provider_error",
+            "status": 502,
+            "error": "extract: response body is not JSON",
+            "synthetic": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "decode-byte-order-mark",
+      "_comment": "One decode contract for body_b64 (invariant 13). Each vector below is an input the three relays used to DISAGREE on, so each pins agreement the old corpus could not: its only invalid-body vector was valid-base64-of-non-JSON, and the only invalid-base64 test anywhere (macOS's) used '!!!not-base64!!!' -- the single input all three already rejected. Contract = the App Server's own b64decode(validate=True), plus strict UTF-8, no BOM, no lone surrogate, and a depth cap. A leading UTF-8 BOM before '{}'. TextDecoder strips a BOM by default, so only the browser accepted it; CPython and the Swift parser both rejected.",
+      "auth_headers": {},
+      "signing_token": "tok",
+      "program": {
+        "purpose": "billing",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/q",
+              "method": "POST",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing",
+              "req_sig": "sig"
+            },
+            "extract": [
+              {
+                "path": "jobId",
+                "as_binding": "jobId",
+                "coerce": "string"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/never",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing"
+            },
+            "extract": [],
+            "stop_on_status_gte": 400
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "77u/e30=",
+          "signature": "s"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "POST",
+            "host": "bq",
+            "path": "/q",
+            "query": "",
+            "headers": {},
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": "sig"
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://bq/q",
+            "request_purpose": "billing",
+            "body_b64": "77u/e30=",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "provider_error",
+            "status": 502,
+            "error": "extract: response body is not JSON",
+            "synthetic": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "decode-depth-over-cap",
+      "_comment": "One decode contract for body_b64 (invariant 13). Each vector below is an input the three relays used to DISAGREE on, so each pins agreement the old corpus could not: its only invalid-body vector was valid-base64-of-non-JSON, and the only invalid-base64 test anywhere (macOS's) used '!!!not-base64!!!' -- the single input all three already rejected. Contract = the App Server's own b64decode(validate=True), plus strict UTF-8, no BOM, no lone surrogate, and a depth cap. Nesting one level past the shared cap of 100. Depth is capped BEFORE parsing because it is the only portable fix: macOS SIGSEGVs in its recursive-descent parser on deep input and the CLI raised an uncaught RecursionError, neither of which the relay can turn into a 502 after the fact.",
+      "auth_headers": {},
+      "signing_token": "tok",
+      "program": {
+        "purpose": "billing",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/q",
+              "method": "POST",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing",
+              "req_sig": "sig"
+            },
+            "extract": [
+              {
+                "path": "jobId",
+                "as_binding": "jobId",
+                "coerce": "string"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/never",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing"
+            },
+            "extract": [],
+            "stop_on_status_gte": 400
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "W1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tdXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXQ==",
+          "signature": "s"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "POST",
+            "host": "bq",
+            "path": "/q",
+            "query": "",
+            "headers": {},
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": "sig"
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://bq/q",
+            "request_purpose": "billing",
+            "body_b64": "W1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tdXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXQ==",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "provider_error",
+            "status": 502,
+            "error": "extract: response body is not JSON",
+            "synthetic": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "decode-depth-at-cap",
+      "_comment": "One decode contract for body_b64 (invariant 13). Each vector below is an input the three relays used to DISAGREE on, so each pins agreement the old corpus could not: its only invalid-body vector was valid-base64-of-non-JSON, and the only invalid-base64 test anywhere (macOS's) used '!!!not-base64!!!' -- the single input all three already rejected. Contract = the App Server's own b64decode(validate=True), plus strict UTF-8, no BOM, no lone surrogate, and a depth cap. Exactly at the cap of 100 -- accepted. Pairs with decode-depth-over-cap so the boundary is pinned from both sides.",
+      "auth_headers": {},
+      "signing_token": "tok",
+      "program": {
+        "purpose": "billing",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/q",
+              "method": "POST",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing",
+              "req_sig": "sig"
+            },
+            "extract": [
+              {
+                "path": "jobId",
+                "as_binding": "jobId",
+                "coerce": "string"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/never",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing"
+            },
+            "extract": [],
+            "stop_on_status_gte": 400
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "W1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW11dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV0=",
+          "signature": "s"
+        },
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "e30=",
+          "signature": "s2"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "POST",
+            "host": "bq",
+            "path": "/q",
+            "query": "",
+            "headers": {},
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": "sig"
+          },
+          {
+            "method": "GET",
+            "host": "bq",
+            "path": "/never",
+            "query": "",
+            "headers": {},
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://bq/q",
+            "request_purpose": "billing",
+            "body_b64": "W1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW11dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV0=",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://bq/never",
+            "request_purpose": "billing",
+            "body_b64": "e30=",
+            "signature": "s2",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "decode-canonical-body-extracts",
+      "_comment": "One decode contract for body_b64 (invariant 13). Each vector below is an input the three relays used to DISAGREE on, so each pins agreement the old corpus could not: its only invalid-body vector was valid-base64-of-non-JSON, and the only invalid-base64 test anywhere (macOS's) used '!!!not-base64!!!' -- the single input all three already rejected. Contract = the App Server's own b64decode(validate=True), plus strict UTF-8, no BOM, no lone surrogate, and a depth cap. The one spelling every relay always accepted, carrying a real jobId. Guards against fixing the divergence by making everything fail: extraction succeeds, so the SECOND step forwards -- the only vector here where it does.",
+      "auth_headers": {},
+      "signing_token": "tok",
+      "program": {
+        "purpose": "billing",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/q",
+              "method": "POST",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing",
+              "req_sig": "sig"
+            },
+            "extract": [
+              {
+                "path": "jobId",
+                "as_binding": "jobId",
+                "coerce": "string"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/never",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing"
+            },
+            "extract": [],
+            "stop_on_status_gte": 400
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "eyJqb2JJZCI6ImoxIn0=",
+          "signature": "s"
+        },
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "e30=",
+          "signature": "s2"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "POST",
+            "host": "bq",
+            "path": "/q",
+            "query": "",
+            "headers": {},
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": "sig"
+          },
+          {
+            "method": "GET",
+            "host": "bq",
+            "path": "/never",
+            "query": "",
+            "headers": {},
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://bq/q",
+            "request_purpose": "billing",
+            "body_b64": "eyJqb2JJZCI6ImoxIn0=",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://bq/never",
+            "request_purpose": "billing",
+            "body_b64": "e30=",
+            "signature": "s2",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "decode-base64-trailing-newline",
+      "_comment": "One decode contract for body_b64 (invariant 13). Each vector below is an input the three relays used to DISAGREE on, so each pins agreement the old corpus could not: its only invalid-body vector was valid-base64-of-non-JSON, and the only invalid-base64 test anywhere (macOS's) used '!!!not-base64!!!' -- the single input all three already rejected. Contract = the App Server's own b64decode(validate=True), plus strict UTF-8, no BOM, no lone surrogate, and a depth cap. 'e30=\\n': not a divergence between the three relays but a near-miss in the GUARD itself. Python's `$` also matches before a trailing newline, so the obvious spelling of the shared canonical-base64 regex accepted this in the CLI while atob and Swift rejected it -- recreating the exact divergence the guard exists to remove. The CLI must anchor with \\Z.",
+      "auth_headers": {},
+      "signing_token": "tok",
+      "program": {
+        "purpose": "billing",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/q",
+              "method": "POST",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing",
+              "req_sig": "sig"
+            },
+            "extract": [
+              {
+                "path": "jobId",
+                "as_binding": "jobId",
+                "coerce": "string"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "request",
+            "request": {
+              "host": "bq",
+              "path": "/never",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "billing"
+            },
+            "extract": [],
+            "stop_on_status_gte": 400
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "e30=\n",
+          "signature": "s"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "POST",
+            "host": "bq",
+            "path": "/q",
+            "query": "",
+            "headers": {},
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": "sig"
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://bq/q",
+            "request_purpose": "billing",
+            "body_b64": "e30=\n",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "provider_error",
+            "status": 502,
+            "error": "extract: response body is not JSON",
+            "synthetic": false
+          }
+        ]
+      }
     }
   ]
 }

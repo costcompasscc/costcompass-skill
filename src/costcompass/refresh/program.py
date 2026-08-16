@@ -43,6 +43,31 @@ from .broker import (
 _TOKEN_RE = re.compile(r"\{([^}]+)\}")
 _PATH_VALUE_CHARSET = re.compile(r"^[A-Za-z0-9._-]*$")
 
+# The shared `body_b64` alphabet — see `_decode_body_strict`. Canonical
+# standard-alphabet base64: whole 4-char groups, padding only at the tail.
+#
+# `\Z`, never `$`. Python's `$` also matches just BEFORE a trailing newline, so
+# the `$` spelling accepts "e30=\n" — which the browser and Swift both reject,
+# recreating in the guard the exact cross-relay divergence the guard exists to
+# remove. Verified against 813k generated inputs: the two spellings disagree on
+# 7372 of them, all trailing-newline. JS and Swift have no equivalent trap.
+_CANONICAL_BASE64 = re.compile(
+    r"^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?\Z"
+)
+
+# Nesting cap, checked BEFORE parsing. Not a hardening nicety — it is the only
+# portable fix: macOS's hand-rolled recursive-descent parser SIGSEGVs on deeply
+# nested input (measured: 20k deep parses, 50k segfaults) and a segfault cannot
+# be caught after the fact, so the input has to be refused before it reaches the
+# parser. Here the symptom was different and just as bad: `RecursionError` is
+# not a `ValueError`, so it escaped `_apply_extract`'s `except` and killed the
+# process. Only the browser degraded cleanly.
+#
+# 100 fires far below every host limit (CPython ~1000, V8 ~10k, Swift ~20k-50k),
+# which is the point: all three refuse at the same depth instead of each at its
+# own accident. Provider billing JSON nests under 10.
+_MAX_JSON_DEPTH = 100
+
 Clock = Callable[[], float]
 
 
@@ -256,6 +281,119 @@ def _reject_json_constant(name: str) -> Any:
     raise ValueError(f"non-standard JSON constant: {name}")
 
 
+def _decode_body_strict(body_b64: str) -> Any:
+    """Decode a broker ``body_b64`` into parsed JSON under the one cross-relay
+    contract, raising on anything outside it.
+
+    LOCKSTEP INVARIANT 13 (one decode contract for ``body_b64``): every relay
+    must accept EXACTLY these bytes. Left to each host language's own decoders
+    the three disagreed on five of seven measured inputs, in no consistent
+    strictness order — and once an undecodable body became a terminal 502 that
+    showed up as a red card on one relay and a green card on another.
+
+    The contract is anchored to the App Server's, not freshly invented:
+    ``RawResponseIn`` validates every inbound ``body_b64`` with
+    ``b64decode(validate=True)``, so a body one relay extracted from but the
+    App Server rejects would fail the ``/responses`` submit anyway. That is
+    what settles it — not taste.
+
+    ASSUMPTION: the relays are the STRICTER side of that pair, never the
+    looser one. ``validate=True`` only checks the alphabet, so it still accepts
+    a few non-canonical spellings this regex refuses (``"++++="`` — four data
+    chars plus a stray pad). Verified by exhaustive comparison over 813k
+    generated inputs: 0 accepted here and rejected there, 6561 the other way.
+    That asymmetry is the safe one — a relay can only fail closed on a body
+    the server would have taken, never hand it one it will reject. Failure
+    mode if it ever inverts: an entry extracts cleanly, then dies at
+    ``/responses`` with a validation error naming a field the user cannot see.
+
+    Each check pins one measured divergence:
+
+    - **Canonical base64.** ``b64decode`` without ``validate`` silently
+      DISCARDS stray characters, so this relay alone accepted ``e30=!!``,
+      ``e3 0=`` and ``e30==``. The explicit alphabet check mirrors
+      ``vault._b64u_decode``, which exists for the same reason.
+    - **Strict UTF-8** — already the CPython default; stated here because the
+      browser's ``TextDecoder`` was not, and needed changing.
+    - **No leading BOM** — CPython rejects one, the browser stripped it.
+    - **Depth cap** — see ``_MAX_JSON_DEPTH``.
+    - **No lone surrogates.** ``json.loads`` and ``JSON.parse`` both accept an
+      unpaired ``\\uD800`` escape; Swift ``String`` cannot REPRESENT one, so
+      "reject" is the only contract all three can implement. Checked after
+      parsing because the escape only becomes a lone surrogate then — valid
+      UTF-8 cannot carry one directly.
+    """
+    if not _CANONICAL_BASE64.match(body_b64):
+        raise ValueError("body_b64 is not canonical base64")
+    text = base64.b64decode(body_b64.encode("ascii"), validate=True).decode("utf-8")
+    if text.startswith("\ufeff"):
+        raise ValueError("body has a byte-order mark")
+    if _exceeds_max_depth(text, _MAX_JSON_DEPTH):
+        raise ValueError("body nests deeper than the shared limit")
+    parsed = json.loads(
+        text,
+        # CPython accepts bare `Infinity`/`-Infinity`/`NaN` as a
+        # non-standard extension; `JSON.parse` REJECTS them, so the
+        # browser reference treats such a body as unparseable. Raise to
+        # land in the same `except` and route to the same provider-error,
+        # instead of extracting an "inf" no other relay can produce.
+        parse_constant=_reject_json_constant,
+    )
+    if _contains_lone_surrogate(parsed):
+        raise ValueError("body contains an unpaired UTF-16 surrogate")
+    return parsed
+
+
+def _exceeds_max_depth(text: str, limit: int) -> bool:
+    """True when bracket nesting in ``text`` ever exceeds ``limit``.
+
+    String-aware: a ``[`` inside a JSON string is data, not structure, and
+    counting it would reject legitimate bodies whose error text happens to
+    contain brackets.
+    """
+    depth = 0
+    in_string = False
+    escaped = False
+    for ch in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch in "[{":
+            depth += 1
+            if depth > limit:
+                return True
+        elif ch in "]}":
+            depth -= 1
+    return False
+
+
+def _contains_lone_surrogate(value: Any) -> bool:
+    """Walk parsed JSON for an unpaired surrogate in any string or object key.
+
+    Every surrogate reachable here is unpaired: CPython combines a well-formed
+    ``\\uD83D\\uDE00`` pair into the single astral character at parse time, so
+    a code point left in the surrogate range never had a partner. Recursion is
+    safe only because ``_exceeds_max_depth`` already ran.
+    """
+    if isinstance(value, str):
+        return any(0xD800 <= ord(ch) <= 0xDFFF for ch in value)
+    if isinstance(value, list):
+        return any(_contains_lone_surrogate(item) for item in value)
+    if isinstance(value, dict):
+        return any(
+            _contains_lone_surrogate(key) or _contains_lone_surrogate(item)
+            for key, item in value.items()
+        )
+    return False
+
+
 def _apply_extract(
     rules: list[dict[str, Any]], body_b64: str, bindings: dict[str, str]
 ) -> bool:
@@ -281,15 +419,7 @@ def _apply_extract(
     if not rules:
         return True
     try:
-        parsed: Any = json.loads(
-            base64.b64decode(body_b64).decode("utf-8"),
-            # CPython accepts bare `Infinity`/`-Infinity`/`NaN` as a
-            # non-standard extension; `JSON.parse` REJECTS them, so the
-            # browser reference treats such a body as unparseable. Raise to
-            # land in the same `except` and route to the same provider-error,
-            # instead of extracting an "inf" no other relay can produce.
-            parse_constant=_reject_json_constant,
-        )
+        parsed: Any = _decode_body_strict(body_b64)
     except (ValueError, UnicodeDecodeError):
         return False
     for rule in rules:
