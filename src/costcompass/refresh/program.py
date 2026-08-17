@@ -55,6 +55,19 @@ _CANONICAL_BASE64 = re.compile(
     r"^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?\Z"
 )
 
+
+def is_canonical_base64(body_b64: str) -> bool:
+    """The base64 clause of the decode contract, on its own.
+
+    Named and exported so the shared ``body-b64-contract.json`` corpus can
+    assert THIS stage across all four implementations. The later clauses
+    (UTF-8, BOM, depth, surrogate) are relay-only — the App Server implements
+    the base64 half and nothing else — so the corpus can only pin this much.
+    Asserting an end-to-end decode against it would assert an equality that is
+    deliberately false.
+    """
+    return _CANONICAL_BASE64.match(body_b64) is not None
+
 # Nesting cap, checked BEFORE parsing. Not a hardening nicety — it is the only
 # portable fix: macOS's hand-rolled recursive-descent parser SIGSEGVs on deeply
 # nested input (measured: 20k deep parses, 50k segfaults) and a segfault cannot
@@ -292,20 +305,18 @@ def _decode_body_strict(body_b64: str) -> Any:
     showed up as a red card on one relay and a green card on another.
 
     The contract is anchored to the App Server's, not freshly invented:
-    ``RawResponseIn`` validates every inbound ``body_b64`` with
-    ``b64decode(validate=True)``, so a body one relay extracted from but the
-    App Server rejects would fail the ``/responses`` submit anyway. That is
-    what settles it — not taste.
+    ``RawResponseIn.body_is_decodable`` tests this same canonical regex, so a
+    body one relay extracts from is exactly a body the ``/responses`` submit
+    accepts. That is what settles it — not taste.
 
-    ASSUMPTION: the relays are the STRICTER side of that pair, never the
-    looser one. ``validate=True`` only checks the alphabet, so it still accepts
-    a few non-canonical spellings this regex refuses (``"++++="`` — four data
-    chars plus a stray pad). Verified by exhaustive comparison over 813k
-    generated inputs: 0 accepted here and rejected there, 6561 the other way.
-    That asymmetry is the safe one — a relay can only fail closed on a body
-    the server would have taken, never hand it one it will reject. Failure
-    mode if it ever inverts: an entry extracts cleanly, then dies at
-    ``/responses`` with a validation error naming a field the user cannot see.
+    The two used to differ, and the record is worth keeping. The server checked
+    ``b64decode(validate=True)`` alone, which validates the ALPHABET only and
+    so still took a few non-canonical spellings this regex refuses (``"++++="``
+    — four data chars plus a stray pad): over 813k generated inputs, 0 accepted
+    here and rejected there, 6561 the other way. Safe, but two rules where one
+    would do. The server now spells the canonical rule directly and this half
+    of the contract is EQUAL on both sides; the relay stays stricter overall
+    through the UTF-8, BOM, surrogate and depth clauses below.
 
     Each check pins one measured divergence:
 
@@ -323,7 +334,7 @@ def _decode_body_strict(body_b64: str) -> Any:
       parsing because the escape only becomes a lone surrogate then — valid
       UTF-8 cannot carry one directly.
     """
-    if not _CANONICAL_BASE64.match(body_b64):
+    if not is_canonical_base64(body_b64):
         raise ValueError("body_b64 is not canonical base64")
     text = base64.b64decode(body_b64.encode("ascii"), validate=True).decode("utf-8")
     if text.startswith("\ufeff"):

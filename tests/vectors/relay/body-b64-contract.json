@@ -1,0 +1,89 @@
+{
+  "_comment": "HAND-WRITTEN corpus, and the only one that is — every other file here is generated from the browser reference. This one is not, because it has FOUR consumers rather than three and no single reference: the App Server is the fourth, and its rule is the one the relays were pinned to in the first place. Generating `canonical` from the browser would quietly make one of the four the oracle for a contract that is supposed to be symmetric. Each `canonical` value below is derived from the rule itself: canonical standard-alphabet base64, i.e. ^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?\\Z. SCOPE: the base64 clause ALONE, which is the only part all four implement. The relays layer strict UTF-8, no BOM, a depth cap and no lone surrogate on top; the server does not, deliberately (invariant 13 in frontend/src/lib/refresh/CLAUDE.md). A consumer must therefore assert its base64 STAGE against these vectors and never its end-to-end decode — an accepted body here is not necessarily an extractable one. Inputs are chosen to DISCRIMINATE: each rejected case is one that at least one of the four host decoders took, or a trap in one host's spelling of the rule.",
+  "vectors": [
+    {
+      "name": "empty",
+      "body_b64": "",
+      "canonical": true,
+      "why": "The forward-cap stub emits an empty body on the CLI and macOS. Zero groups, no padding — the regex matches, and b64decode returns b''."
+    },
+    {
+      "name": "no-padding-needed",
+      "body_b64": "AAAA",
+      "canonical": true,
+      "why": "One whole 4-char group, no tail. The base case for the (?:....)* half."
+    },
+    {
+      "name": "single-pad",
+      "body_b64": "YWI=",
+      "canonical": true,
+      "why": "Two data chars plus one pad: the 3-char-tail branch of the regex."
+    },
+    {
+      "name": "double-pad",
+      "body_b64": "e30=",
+      "canonical": true,
+      "why": "'{}' — the only one of the historically divergent inputs all four accept, which is what made it the anchor for invariant 13."
+    },
+    {
+      "name": "whole-groups-no-tail",
+      "body_b64": "YWJj",
+      "canonical": true,
+      "why": "'abc' — three raw bytes encode to exactly one group with no padding at all."
+    },
+    {
+      "name": "stray-pad-after-full-group",
+      "body_b64": "++++=",
+      "canonical": false,
+      "why": "Four data chars (a complete group) plus a stray pad. The case this corpus exists for: the App Server's old b64decode(validate=True) check validated the ALPHABET only and ACCEPTED this, while all three relays refused it. Measured over 813k generated inputs, this shape accounted for the 6561 server-accepted/relay-rejected disagreements."
+    },
+    {
+      "name": "over-padded",
+      "body_b64": "e30==",
+      "canonical": false,
+      "why": "Accepted by Data(base64Encoded:) on macOS and by CPython's b64decode, rejected by the browser's atob. Proof there is no strictness ORDERING among the host decoders — it is not the case that one is uniformly strictest."
+    },
+    {
+      "name": "embedded-space",
+      "body_b64": "e3 0=",
+      "canonical": false,
+      "why": "The mirror of over-padded: accepted by atob, rejected by Data(base64Encoded:). The pair together is why an explicit shared rule was needed rather than picking a host decoder."
+    },
+    {
+      "name": "unpadded",
+      "body_b64": "e30",
+      "canonical": false,
+      "why": "Correct alphabet, missing its pad. Some decoders infer the padding; the contract requires it written."
+    },
+    {
+      "name": "trailing-newline",
+      "body_b64": "e30=\n",
+      "canonical": false,
+      "why": "A trap in ONE host's spelling, not in the rule. Python's `$` also matches just before a trailing newline, so a Python implementation written with `$` instead of `\\Z` accepts this while JS and Swift reject it — recreating the exact cross-relay divergence the contract removes. Both Python consumers (the App Server and the CLI) must use \\Z; this vector is what catches it if one regresses."
+    },
+    {
+      "name": "padding-mid-string",
+      "body_b64": "ab=c",
+      "canonical": false,
+      "why": "Padding is only ever a tail. A decoder that scans for the alphabet without checking position takes this."
+    },
+    {
+      "name": "excess-after-padding",
+      "body_b64": "e30=!!",
+      "canonical": false,
+      "why": "Python's b64decode WITHOUT validate=True silently DISCARDS characters outside the alphabet, so the CLI alone accepted this before the explicit check went in."
+    },
+    {
+      "name": "url-safe-alphabet",
+      "body_b64": "e-3_",
+      "canonical": false,
+      "why": "base64URL, not standard base64. body_b64 is standard-alphabet; the URL-safe variant belongs to the vault's JWE layer (b64uDecode) and must not be accepted here, or the two alphabets start blurring at the wire boundary."
+    },
+    {
+      "name": "outside-alphabet",
+      "body_b64": "not-base64!!!",
+      "canonical": false,
+      "why": "The control. All four rejected this before the contract existed, which is exactly why it could not have caught any of the divergences above — it was, for a long time, the only invalid-base64 input tested anywhere in the three relays."
+    }
+  ]
+}

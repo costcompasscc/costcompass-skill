@@ -52,6 +52,28 @@ def test_vendored_corpus_matches_manifest() -> None:
         assert got == want, f"{name} does not match MANIFEST.sha256"
 
 
+# --- body_b64 base64 contract -----------------------------------------------
+# The one corpus here with FOUR consumers rather than three: the App Server is
+# the fourth, and the canonical-base64 rule this relay was pinned to is ITS
+# rule. So it is hand-written rather than generated from the browser reference
+# — generating it would make one relay the oracle for a symmetric contract.
+#
+# Scope is the base64 STAGE only. `_decode_body_strict` layers strict UTF-8,
+# BOM, depth and surrogate clauses on top that the server does not implement,
+# so asserting it end-to-end here would assert an equality that is deliberately
+# false. This Python side also carries the `\Z`-not-`$` trap, which the
+# trailing-newline vector is what catches.
+
+_B64_CONTRACT = _load("body-b64-contract.json")
+
+
+@pytest.mark.parametrize("vec", _B64_CONTRACT, ids=_ids(_B64_CONTRACT))
+def test_body_b64_contract_vector(vec: dict) -> None:
+    assert program_mod.is_canonical_base64(vec["body_b64"]) is vec["canonical"], (
+        vec["why"]
+    )
+
+
 # --- Vault JWE decrypt ------------------------------------------------------
 
 _JWE = _load("jwe-decrypt.json")
