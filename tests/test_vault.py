@@ -176,12 +176,14 @@ def test_entry_for_skips_non_dict_element():
     """A non-object element inside ``entries`` is stepped over, not fatal.
 
     The shared corpus (``vectors/relay/vault-entry-lookup.json``) deliberately
-    cannot cover this: the browser's lookup is only reachable through
-    ``deserializeVault``, which rejects such a document before ``findEntry``
-    runs, so pinning it there would fabricate an agreement the three ports
-    cannot reach. Each port covers it locally instead. Before this guard the
-    scan raised ``AttributeError`` here while the other two degraded to
-    "no match".
+    does not cover this: it is the lookup over documents whose ``entries``
+    elements are objects, and the browser's corpus consumer asserts that
+    boundary. All three predicates step over such an element at the lookup
+    layer, but the browser's typed production path (``deserializeVault``)
+    rejects the document before ``findEntry`` runs, so a shared vector would
+    be a malformed document, not a lookup case. Each port covers it locally.
+    Before this guard the scan raised ``AttributeError`` here while the other
+    two degraded to "no match".
     """
     v = vault.Vault(
         doc={"entries": [None, "nope", 42, ["x"], {"provider": "a", "api_key": "k"}]},
