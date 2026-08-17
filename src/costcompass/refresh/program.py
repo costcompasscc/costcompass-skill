@@ -28,7 +28,8 @@ import base64
 import json
 import re
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 from urllib.parse import urlencode
 
 from .broker import (
@@ -67,6 +68,7 @@ def is_canonical_base64(body_b64: str) -> bool:
     deliberately false.
     """
     return _CANONICAL_BASE64.match(body_b64) is not None
+
 
 # Nesting cap, checked BEFORE parsing. Not a hardening nicety — it is the only
 # portable fix: macOS's hand-rolled recursive-descent parser SIGSEGVs on deeply
@@ -323,7 +325,7 @@ def _decode_body_strict(body_b64: str) -> Any:
     - **Canonical base64.** ``b64decode`` without ``validate`` silently
       DISCARDS stray characters, so this relay alone accepted ``e30=!!``,
       ``e3 0=`` and ``e30==``. The explicit alphabet check mirrors
-      ``vault._b64u_decode``, which exists for the same reason.
+      ``vault.crypto._b64u_decode``, which exists for the same reason.
     - **Strict UTF-8** — already the CPython default; stated here because the
       browser's ``TextDecoder`` was not, and needed changing.
     - **No leading BOM** — CPython rejects one, the browser stripped it.

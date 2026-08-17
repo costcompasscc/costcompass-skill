@@ -1,24 +1,26 @@
 # LOCKSTEP: one of three relay implementations (browser is the
 # reference) — semantic changes here must land in the CostCompass
 # monorepo, checked out alongside this repo, at
-# ../costcompass/frontend/src/lib/vault/jwe-compact.ts, crypto.ts,
-# and entries.ts, and ../costcompass/client/macos/CostCompassKit/Sources/
-#   CostCompassKit/Vault/JWECompact.swift + Vault.swift.
+# ../costcompass/frontend/src/lib/vault/jwe-compact.ts and crypto.ts,
+# and ../costcompass/client/macos/CostCompassKit/Sources/
+#   CostCompassKit/Vault/JWECompact.swift.
 # See "Three relay implementations" in that repo's root CLAUDE.md;
 # `make lockstep` there enumerates the whole set across both repos.
 
-"""Vault retrieval + JWE decrypt/encrypt and entry lookup.
+"""Vault JWE decrypt/encrypt.
 
-Mirrors the browser vault (`../costcompass/frontend/src/lib/vault/`) and
-the format contract in `../costcompass/doc/design/vault-format-spec.md`:
+Mirrors the browser vault crypto (`../costcompass/frontend/src/lib/vault/
+jwe-compact.ts` + `crypto.ts`) and the format contract in
+`../costcompass/doc/design/vault-format-spec.md`:
 
     JWE compact, alg = PBES2-HS256+A128KW, enc = A256GCM
     <protected_header>.<encrypted_key>.<iv>.<ciphertext>.<tag>
     PBKDF2 salt = UTF8(alg) || 0x00 || p2s         (RFC 7518 §4.8.1.1)
     AES-GCM AAD = ASCII(base64url(protected_header))
 
-The decrypted vault stays in process memory only — never written to
-disk, never logged.
+Finding an entry inside the decrypted document is a separate concern with
+its own ports — see `entries.py`. The decrypted vault stays in process
+memory only — never written to disk, never logged.
 """
 
 from __future__ import annotations
@@ -28,15 +30,12 @@ import json
 import os
 import re
 import unicodedata
-from dataclasses import dataclass
 from typing import Any
 
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives.keywrap import aes_key_unwrap, aes_key_wrap
-
-from . import api
 
 PBES2_ALG = "PBES2-HS256+A128KW"
 ENC_ALG = "A256GCM"
@@ -216,55 +215,6 @@ def encrypt_jwe(
     )
 
 
-def _entry_matches(entry: Any, provider: str, instance_key: str) -> bool:
-    """The single (provider, instance_key) matching predicate.
-
-    LOCKSTEP INVARIANT 14 — every site that decides "is this the entry?" goes
-    through here, in all three relays. See invariant 14 in
-    ``frontend/src/lib/refresh/CLAUDE.md``; pinned by
-    ``test-vectors/relay/vault-entry-lookup.json``.
-
-    ``instance_key`` arrives normalized: an absent, ``None`` or ``""`` selector
-    is the provider-DEFAULT lookup, spelled ``""`` here.
-
-    On the entry side, a ``metadata.instance_key`` that is absent or ``None``
-    means the default slot, so it compares equal to ``""``. A non-``str``,
-    non-``None`` value (number, bool, list, dict) is a foreign value the format
-    permits but no writer produces: that entry is neither the default card nor
-    any named card, so no lookup ever returns it. It is unreachable, not an
-    error — the same way any missing entry falls through.
-    """
-    if not isinstance(entry, dict) or entry.get("provider") != provider:
-        return False
-    meta = entry.get("metadata")
-    ek = meta.get("instance_key") if isinstance(meta, dict) else None
-    if ek is None:
-        return instance_key == ""
-    if not isinstance(ek, str):
-        return False
-    return ek == instance_key
-
-
-@dataclass
-class Vault:
-    """A decrypted vault document plus the params needed to write it back."""
-
-    doc: dict[str, Any]
-    p2s: bytes
-    p2c: int
-    revision: int
-
-    def entry_for(
-        self, provider: str, instance_key: str | None = None
-    ) -> dict[str, Any] | None:
-        """Find the entry for (provider, instance_key); mirrors findEntry."""
-        key = instance_key or ""
-        for entry in self.doc.get("entries", []):
-            if _entry_matches(entry, provider, key):
-                return entry
-        return None
-
-
 def decrypt_to_doc(jwe: str, password: str) -> tuple[dict[str, Any], bytes, int]:
     """Decrypt a JWE and parse its plaintext as the vault document.
 
@@ -285,26 +235,3 @@ def decrypt_to_doc(jwe: str, password: str) -> tuple[dict[str, Any], bytes, int]
     finally:
         _zero(plaintext)
     return doc, p2s, p2c
-
-
-def fetch_and_decrypt(client: api.Client, password: str) -> Vault:
-    """GET /vault and decrypt; raises VaultError if absent or wrong password."""
-    blob = client.get_vault()
-    if blob is None:
-        raise VaultError(
-            "No vault found for this account — set one up in the app first."
-        )
-    doc, p2s, p2c = decrypt_to_doc(blob["jwe"], password)
-    return Vault(doc=doc, p2s=p2s, p2c=p2c, revision=int(blob["revision"]))
-
-
-def write_back(client: api.Client, vault: Vault, password: str) -> int:
-    """Re-encrypt the (possibly mutated) doc and PUT it. Returns new revision."""
-    plaintext = bytearray(json.dumps(vault.doc, separators=(",", ":")).encode("utf-8"))
-    try:
-        jwe = encrypt_jwe(plaintext, password, vault.p2s, vault.p2c)
-    finally:
-        _zero(plaintext)
-    result = client.put_vault(jwe, expected_revision=vault.revision)
-    vault.revision = int(result["revision"])
-    return vault.revision

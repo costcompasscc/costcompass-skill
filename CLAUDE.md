@@ -37,7 +37,10 @@ src/costcompass/
   api.py         httpx client for /api/v1 (injectable for tests)
   services.py    dynamic service-name -> provider-id resolution
   render.py      plain-text output (no rich)
-  vault.py       GET + decrypt JWE (PBES2-HS256+A128KW / A256GCM), entry lookup, write-back
+  vault/
+    __init__.py      GET the blob + write-back; re-exports the two below
+    crypto.py        JWE decrypt/encrypt (PBES2-HS256+A128KW / A256GCM)
+    entries.py       (provider, instance_key) -> entry lookup
   refresh/
     orchestrator.py  fetch run end to end (flat + program paths)
     broker.py        POST /broker/v1/forward client (API-key auth, forward cap)

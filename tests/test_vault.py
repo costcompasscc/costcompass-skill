@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from costcompass import api, vault
+from costcompass.vault import crypto as vault_crypto
 
 PASSWORD = "correct horse battery staple"
 SAMPLE_DOC = {
@@ -69,7 +70,7 @@ def test_missing_p2s_raises_vault_error(jwe_blob):
     import base64 as _b64
 
     parts = jwe_blob.split(".")
-    header = json.loads(vault._b64u_decode(parts[0]))
+    header = json.loads(vault_crypto._b64u_decode(parts[0]))
     del header["p2s"]
     parts[0] = _b64.urlsafe_b64encode(json.dumps(header).encode()).rstrip(b"=").decode()
     with pytest.raises(vault.VaultError, match="p2s"):
@@ -87,9 +88,9 @@ def _retarget_p2c(jwe_blob, p2c):
     """Rewrite a valid blob's header `p2c`, leaving everything else intact so
     the iteration band is the only reason validation can fail."""
     parts = jwe_blob.split(".")
-    header = json.loads(vault._b64u_decode(parts[0]))
+    header = json.loads(vault_crypto._b64u_decode(parts[0]))
     header["p2c"] = p2c
-    parts[0] = vault._b64u_encode(json.dumps(header).encode())
+    parts[0] = vault_crypto._b64u_encode(json.dumps(header).encode())
     return ".".join(parts)
 
 
@@ -256,14 +257,14 @@ def test_write_back_bumps_revision(jwe_blob):
 
 
 class _ZeroSpy:
-    """Wraps the real `vault._zero`: snapshots each buffer at call time (to prove
+    """Wraps the real `vault_crypto._zero`: snapshots each buffer at call time (to prove
     it held live key material) then scrubs it for real (to prove it ends zeroed).
     After the code under test returns, `.snapshots`/`.buffers` are inspected."""
 
     def __init__(self):
         self.snapshots: list[bytes] = []
         self.buffers: list[bytearray] = []
-        self._real = vault._zero  # capture the real impl before patching
+        self._real = vault_crypto._zero  # capture the real impl before patching
 
     def __call__(self, buf: bytearray) -> None:
         self.snapshots.append(bytes(buf))
@@ -273,7 +274,9 @@ class _ZeroSpy:
     def install(self, monkeypatch):
         # Patch the module global so decrypt_jwe/encrypt_jwe/etc. resolve us at
         # call time; we delegate to the real _zero captured in __init__.
-        monkeypatch.setattr(vault, "_zero", self)
+        # `vault.crypto` is the one place it lives — the write-back path in the
+        # package's __init__ reaches it the same way, so both are covered.
+        monkeypatch.setattr(vault_crypto, "_zero", self)
         return self
 
 
@@ -286,14 +289,14 @@ def _assert_all_scrubbed(spy: _ZeroSpy) -> None:
 def test_zero_overwrites_in_place():
     buf = bytearray(b"\x11" * 32)
     ident = id(buf)
-    vault._zero(buf)
+    vault_crypto._zero(buf)
     assert bytes(buf) == b"\x00" * 32
     assert len(buf) == 32
     assert id(buf) == ident  # in-place, no realloc that would strand the original
 
 
 def test_zero_empty_is_noop():
-    vault._zero(bytearray())  # must not raise
+    vault_crypto._zero(bytearray())  # must not raise
 
 
 def test_decrypt_zeroizes_kek_and_cek(jwe_blob, monkeypatch):
@@ -349,7 +352,7 @@ def test_encrypt_zeroizes_kek_and_cek_on_wrap_failure(monkeypatch):
     def boom(*_args, **_kwargs):
         raise RuntimeError("wrap exploded")
 
-    monkeypatch.setattr(vault, "aes_key_wrap", boom)
+    monkeypatch.setattr(vault_crypto, "aes_key_wrap", boom)
     spy = _ZeroSpy().install(monkeypatch)
     with pytest.raises(RuntimeError, match="wrap exploded"):
         vault.encrypt_jwe(
