@@ -269,6 +269,33 @@ def test_deadline_stub_vector(vec: dict) -> None:
     assert _norm_response(got) == vec["expect"]
 
 
+# --- Vault entry lookup -----------------------------------------------------
+# Hand-written corpus, like body-b64-contract but for a different reason: the
+# rule it pins is a DECISION, not any one relay's behaviour. The three relays
+# disagreed three ways on a non-string ``metadata.instance_key`` with no
+# majority to defer to, so the browser could not be the oracle. See invariant
+# 14 in frontend/src/lib/refresh/CLAUDE.md.
+#
+# Identity is asserted through ``api_key`` rather than ``id`` because the macOS
+# port's VaultEntry carries no id.
+
+_ENTRY_LOOKUP = _load("vault-entry-lookup.json")
+
+
+@pytest.mark.parametrize("vec", _ENTRY_LOOKUP, ids=_ids(_ENTRY_LOOKUP))
+def test_vault_entry_lookup_vector(vec: dict) -> None:
+    v = vault.Vault(
+        doc=vec["document"],
+        p2s=b"\x00" * 16,
+        p2c=vault.DEFAULT_PBKDF2_ITERS,
+        revision=1,
+    )
+    selector = vec["selector"]
+    found = v.entry_for(selector["provider"], selector.get("instance_key"))
+    actual = found["api_key"] if found is not None else None
+    assert actual == vec["expect_api_key"], vec["why"]
+
+
 # --- Credential routing decision --------------------------------------------
 # Which outcome CATEGORY the relay resolves an entry to, given the
 # server-authored credential.kind, the subscription_only marker, and whether the

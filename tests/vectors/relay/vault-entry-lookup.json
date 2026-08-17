@@ -1,0 +1,548 @@
+{
+  "_comment": "HAND-WRITTEN corpus (the second one here that is not generated from the browser reference). It is hand-written because the rule it pins is a DECISION, not any one relay's behaviour: before this corpus existed the three relays disagreed three ways on a non-string `metadata.instance_key`, with no majority to defer to, so generating `expect_api_key` from the browser would have dressed one relay up as an oracle for a rule it never owned. THE RULE (invariant 14 in frontend/src/lib/refresh/CLAUDE.md): on the SELECTOR side, absent / null / \"\" are the same selector -- the provider-default lookup; any other value is an exact string lookup. On the ENTRY side, read `metadata.instance_key`; if `metadata` is not an object the key counts as absent. The entry occupies the DEFAULT slot iff that key is absent, null, or \"\". A non-string, non-null value (number, bool, array, object) is a foreign value the format permits but no writer produces: the entry is neither the default card nor any named card, so no lookup returns it -- unreachable, not an error. IDENTITY is asserted through `api_key`, not `id`, because the macOS port's VaultEntry carries no id. SCOPE: the lookup ALONE, over an ALREADY-PARSED document -- every consumer enters at that same layer (the CLI hands `entry_for` a raw dict, macOS hands `entryFor` a raw JSONValue, and the browser casts rather than routing through `deserializeVault`), because validating on one side only would give that port a stricter pre-step than the equality claims. Documents are kept schema-valid anyway: realistic input, and it keeps the stricter harness available. A non-object element inside `entries` is NOT covered here -- the browser's `Vault` type forbids one and its predicate would throw on it, where the other two step over it, so asserting it would fabricate an agreement the three cannot actually reach. Each port covers that case in its own unit tests.",
+  "vectors": [
+    {
+      "name": "dual-mode/default-selector-absent",
+      "why": "The load-bearing case. A dual-mode provider owns three entries at once; a default lookup must return the default-slot card and NOT the OAuth sentinel that precedes nothing and follows it. Handing a pasted-key card the sentinel's refresh token is the exact confusion the rule exists to prevent.",
+      "document": {
+        "schema_version": 1,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z",
+        "entries": [
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ01",
+            "provider": "cloudflare",
+            "label": "Default",
+            "api_key": "KEY-default",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z"
+          },
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ02",
+            "provider": "cloudflare",
+            "label": "OAuth",
+            "api_key": "KEY-sentinel",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z",
+            "metadata": { "instance_key": "__cloudflare_oauth__" }
+          },
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ03",
+            "provider": "cloudflare",
+            "label": "Project B",
+            "api_key": "KEY-named",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z",
+            "metadata": { "instance_key": "proj-b" }
+          }
+        ]
+      },
+      "selector": { "provider": "cloudflare" },
+      "expect_api_key": "KEY-default"
+    },
+    {
+      "name": "dual-mode/default-selector-empty-string",
+      "why": "An explicitly empty selector is the SAME selector as an absent one. This is the divergence the browser alone used to get wrong -- it required entryKey === \"\" and so missed an entry with no metadata at all.",
+      "document": {
+        "schema_version": 1,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z",
+        "entries": [
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ01",
+            "provider": "cloudflare",
+            "label": "Default",
+            "api_key": "KEY-default",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z"
+          },
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ02",
+            "provider": "cloudflare",
+            "label": "OAuth",
+            "api_key": "KEY-sentinel",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z",
+            "metadata": { "instance_key": "__cloudflare_oauth__" }
+          }
+        ]
+      },
+      "selector": { "provider": "cloudflare", "instance_key": "" },
+      "expect_api_key": "KEY-default"
+    },
+    {
+      "name": "dual-mode/exact-sentinel",
+      "why": "The sentinel is reachable only by naming it. This is how every OAuth refresh-token read and rotation write-back finds its entry.",
+      "document": {
+        "schema_version": 1,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z",
+        "entries": [
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ01",
+            "provider": "cloudflare",
+            "label": "Default",
+            "api_key": "KEY-default",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z"
+          },
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ02",
+            "provider": "cloudflare",
+            "label": "OAuth",
+            "api_key": "KEY-sentinel",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z",
+            "metadata": { "instance_key": "__cloudflare_oauth__" }
+          }
+        ]
+      },
+      "selector": { "provider": "cloudflare", "instance_key": "__cloudflare_oauth__" },
+      "expect_api_key": "KEY-sentinel"
+    },
+    {
+      "name": "exact/named-card",
+      "why": "An ordinary multi-instance card, found by its own key.",
+      "document": {
+        "schema_version": 1,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z",
+        "entries": [
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ01",
+            "provider": "google",
+            "label": "Project B",
+            "api_key": "KEY-named",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z",
+            "metadata": { "instance_key": "proj-b" }
+          }
+        ]
+      },
+      "selector": { "provider": "google", "instance_key": "proj-b" },
+      "expect_api_key": "KEY-named"
+    },
+    {
+      "name": "exact/named-selector-misses-default-slot",
+      "why": "A named selector must NOT fall back to the default card. Asymmetry is the point: absent-key entries answer only the default selector.",
+      "document": {
+        "schema_version": 1,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z",
+        "entries": [
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ01",
+            "provider": "google",
+            "label": "Default",
+            "api_key": "KEY-default",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z"
+          }
+        ]
+      },
+      "selector": { "provider": "google", "instance_key": "proj-b" },
+      "expect_api_key": null
+    },
+    {
+      "name": "provider/no-match",
+      "why": "Provider is matched before anything else; a populated vault with the wrong provider yields nothing.",
+      "document": {
+        "schema_version": 1,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z",
+        "entries": [
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ01",
+            "provider": "google",
+            "label": "Default",
+            "api_key": "KEY-default",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z"
+          }
+        ]
+      },
+      "selector": { "provider": "openai" },
+      "expect_api_key": null
+    },
+    {
+      "name": "empty-vault",
+      "why": "No entries at all. Degenerate, but it is the state a fresh vault is in and every port must return 'none' rather than throw.",
+      "document": {
+        "schema_version": 1,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z",
+        "entries": []
+      },
+      "selector": { "provider": "openai" },
+      "expect_api_key": null
+    },
+    {
+      "name": "stored-key/null",
+      "why": "An explicit JSON null in the default slot. `null` and absent mean the same thing on the entry side.",
+      "document": {
+        "schema_version": 1,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z",
+        "entries": [
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ01",
+            "provider": "openai",
+            "label": "Default",
+            "api_key": "KEY-null",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z",
+            "metadata": { "instance_key": null }
+          }
+        ]
+      },
+      "selector": { "provider": "openai" },
+      "expect_api_key": "KEY-null"
+    },
+    {
+      "name": "stored-key/null-not-reachable-by-name",
+      "why": "A null key occupies the default slot and nothing else -- naming it as a string must not find it.",
+      "document": {
+        "schema_version": 1,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z",
+        "entries": [
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ01",
+            "provider": "openai",
+            "label": "Default",
+            "api_key": "KEY-null",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z",
+            "metadata": { "instance_key": null }
+          }
+        ]
+      },
+      "selector": { "provider": "openai", "instance_key": "null" },
+      "expect_api_key": null
+    },
+    {
+      "name": "stored-key/empty-string",
+      "why": "An explicitly empty stored key is the default slot, same as absent.",
+      "document": {
+        "schema_version": 1,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z",
+        "entries": [
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ01",
+            "provider": "openai",
+            "label": "Default",
+            "api_key": "KEY-empty",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z",
+            "metadata": { "instance_key": "" }
+          }
+        ]
+      },
+      "selector": { "provider": "openai", "instance_key": "" },
+      "expect_api_key": "KEY-empty"
+    },
+    {
+      "name": "metadata/absent-object",
+      "why": "A metadata object that simply has no instance_key. The common shape for a single-instance provider that stores notes or tags.",
+      "document": {
+        "schema_version": 1,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z",
+        "entries": [
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ01",
+            "provider": "openai",
+            "label": "Default",
+            "api_key": "KEY-nometa",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z",
+            "metadata": { "future_field": "survives" }
+          }
+        ]
+      },
+      "selector": { "provider": "openai" },
+      "expect_api_key": "KEY-nometa"
+    },
+    {
+      "name": "metadata/null",
+      "why": "`metadata` itself is null. Not an object, so the key counts as absent and the entry is the default card.",
+      "document": {
+        "schema_version": 1,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z",
+        "entries": [
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ01",
+            "provider": "openai",
+            "label": "Default",
+            "api_key": "KEY-metanull",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z",
+            "metadata": null
+          }
+        ]
+      },
+      "selector": { "provider": "openai" },
+      "expect_api_key": "KEY-metanull"
+    },
+    {
+      "name": "metadata/non-object-string",
+      "why": "`metadata` is a string. Same rule as null -- not an object, key counts as absent. Each port reaches this differently (browser drops it in serde, CLI guards with isinstance, macOS's object subscript returns nil), which is exactly why it is pinned.",
+      "document": {
+        "schema_version": 1,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z",
+        "entries": [
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ01",
+            "provider": "openai",
+            "label": "Default",
+            "api_key": "KEY-metastring",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z",
+            "metadata": "not-an-object"
+          }
+        ]
+      },
+      "selector": { "provider": "openai" },
+      "expect_api_key": "KEY-metastring"
+    },
+    {
+      "name": "metadata/non-object-array",
+      "why": "`metadata` is an array. Arrays are objects in JS but not JSON objects; all three must agree the key is absent.",
+      "document": {
+        "schema_version": 1,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z",
+        "entries": [
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ01",
+            "provider": "openai",
+            "label": "Default",
+            "api_key": "KEY-metaarray",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z",
+            "metadata": []
+          }
+        ]
+      },
+      "selector": { "provider": "openai" },
+      "expect_api_key": "KEY-metaarray"
+    },
+    {
+      "name": "foreign-key/number-42",
+      "why": "A non-string key is a foreign value: unreachable by the default selector. macOS alone used to match here, because JSONValue.stringValue returns nil for a number and so read as 'absent'.",
+      "document": {
+        "schema_version": 1,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z",
+        "entries": [
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ01",
+            "provider": "openai",
+            "label": "Odd",
+            "api_key": "KEY-foreign",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z",
+            "metadata": { "instance_key": 42 }
+          }
+        ]
+      },
+      "selector": { "provider": "openai" },
+      "expect_api_key": null
+    },
+    {
+      "name": "foreign-key/number-42-not-reachable-by-name",
+      "why": "Nor is it reachable by its own value spelled as a string. A foreign key names no card at all.",
+      "document": {
+        "schema_version": 1,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z",
+        "entries": [
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ01",
+            "provider": "openai",
+            "label": "Odd",
+            "api_key": "KEY-foreign",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z",
+            "metadata": { "instance_key": 42 }
+          }
+        ]
+      },
+      "selector": { "provider": "openai", "instance_key": "42" },
+      "expect_api_key": null
+    },
+    {
+      "name": "foreign-key/number-zero",
+      "why": "Zero is the trap for a truthiness test. The CLI's old `if not ek` folded 0 into the default slot; macOS's stringValue read it as absent. Both had to change.",
+      "document": {
+        "schema_version": 1,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z",
+        "entries": [
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ01",
+            "provider": "openai",
+            "label": "Odd",
+            "api_key": "KEY-foreign",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z",
+            "metadata": { "instance_key": 0 }
+          }
+        ]
+      },
+      "selector": { "provider": "openai" },
+      "expect_api_key": null
+    },
+    {
+      "name": "foreign-key/false",
+      "why": "The other falsy trap. Same three-way split as 0.",
+      "document": {
+        "schema_version": 1,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z",
+        "entries": [
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ01",
+            "provider": "openai",
+            "label": "Odd",
+            "api_key": "KEY-foreign",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z",
+            "metadata": { "instance_key": false }
+          }
+        ]
+      },
+      "selector": { "provider": "openai" },
+      "expect_api_key": null
+    },
+    {
+      "name": "foreign-key/true",
+      "why": "A truthy non-string. Only macOS used to match this one, which is why there was no majority to conform to and the rule had to be decided.",
+      "document": {
+        "schema_version": 1,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z",
+        "entries": [
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ01",
+            "provider": "openai",
+            "label": "Odd",
+            "api_key": "KEY-foreign",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z",
+            "metadata": { "instance_key": true }
+          }
+        ]
+      },
+      "selector": { "provider": "openai" },
+      "expect_api_key": null
+    },
+    {
+      "name": "foreign-key/empty-array",
+      "why": "An empty array is falsy in Python and truthy-absent through stringValue in Swift. Foreign either way.",
+      "document": {
+        "schema_version": 1,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z",
+        "entries": [
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ01",
+            "provider": "openai",
+            "label": "Odd",
+            "api_key": "KEY-foreign",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z",
+            "metadata": { "instance_key": [] }
+          }
+        ]
+      },
+      "selector": { "provider": "openai" },
+      "expect_api_key": null
+    },
+    {
+      "name": "foreign-key/empty-object",
+      "why": "Same as the empty array, in the other container shape.",
+      "document": {
+        "schema_version": 1,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z",
+        "entries": [
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ01",
+            "provider": "openai",
+            "label": "Odd",
+            "api_key": "KEY-foreign",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z",
+            "metadata": { "instance_key": {} }
+          }
+        ]
+      },
+      "selector": { "provider": "openai" },
+      "expect_api_key": null
+    },
+    {
+      "name": "foreign-key/skipped-not-fatal",
+      "why": "The reason 'unreachable' beats 'hard error': a foreign entry sitting BEFORE the real default card must be stepped over, not returned and not thrown on. The scan continues and the default card is still found.",
+      "document": {
+        "schema_version": 1,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z",
+        "entries": [
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ01",
+            "provider": "openai",
+            "label": "Odd",
+            "api_key": "KEY-foreign",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z",
+            "metadata": { "instance_key": 42 }
+          },
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ02",
+            "provider": "openai",
+            "label": "Default",
+            "api_key": "KEY-default",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z"
+          }
+        ]
+      },
+      "selector": { "provider": "openai" },
+      "expect_api_key": "KEY-default"
+    },
+    {
+      "name": "order/first-match-wins",
+      "why": "Two entries both occupy the default slot -- a state the UI does not create but the format does not forbid. All three scan in document order and return the first, so the ports agree on which duplicate a run would use.",
+      "document": {
+        "schema_version": 1,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z",
+        "entries": [
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ01",
+            "provider": "openai",
+            "label": "First",
+            "api_key": "KEY-first",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z"
+          },
+          {
+            "id": "01ABCDEFGHJKMNPQRSTVWXYZ02",
+            "provider": "openai",
+            "label": "Second",
+            "api_key": "KEY-second",
+            "created_at": "2026-01-01T00:00:00.000Z",
+            "updated_at": "2026-01-01T00:00:00.000Z",
+            "metadata": { "instance_key": "" }
+          }
+        ]
+      },
+      "selector": { "provider": "openai" },
+      "expect_api_key": "KEY-first"
+    }
+  ]
+}

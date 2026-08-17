@@ -171,6 +171,27 @@ def test_entry_for_default_and_explicit(jwe_blob):
     assert v.entry_for("openai") is None
 
 
+def test_entry_for_skips_non_dict_element():
+    """A non-object element inside ``entries`` is stepped over, not fatal.
+
+    The shared corpus (``vectors/relay/vault-entry-lookup.json``) deliberately
+    cannot cover this: the browser's lookup is only reachable through
+    ``deserializeVault``, which rejects such a document before ``findEntry``
+    runs, so pinning it there would fabricate an agreement the three ports
+    cannot reach. Each port covers it locally instead. Before this guard the
+    scan raised ``AttributeError`` here while the other two degraded to
+    "no match".
+    """
+    v = vault.Vault(
+        doc={"entries": [None, "nope", 42, ["x"], {"provider": "a", "api_key": "k"}]},
+        p2s=b"\x00" * 16,
+        p2c=vault.DEFAULT_PBKDF2_ITERS,
+        revision=1,
+    )
+    assert v.entry_for("a")["api_key"] == "k"
+    assert v.entry_for("missing") is None
+
+
 def test_fetch_and_decrypt(jwe_blob):
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(

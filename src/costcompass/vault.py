@@ -167,13 +167,13 @@ def decrypt_jwe(jwe: str, password: str) -> tuple[bytearray, bytes, int]:
         # Wrong password and tampered blob are deliberately indistinguishable.
         try:
             cek = bytearray(aes_key_unwrap(kek, enc_key))
-        except Exception as exc:  # noqa: BLE001 - any unwrap failure = bad password
+        except Exception as exc:  # any unwrap failure = bad password
             raise VaultError(
                 "could not decrypt vault (wrong password?)", category="wrong_password"
             ) from exc
         try:
             plaintext = bytearray(AESGCM(cek).decrypt(iv, ciphertext + tag, aad))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise VaultError(
                 "could not decrypt vault (wrong password?)", category="wrong_password"
             ) from exc
@@ -216,6 +216,35 @@ def encrypt_jwe(
     )
 
 
+def _entry_matches(entry: Any, provider: str, instance_key: str) -> bool:
+    """The single (provider, instance_key) matching predicate.
+
+    LOCKSTEP INVARIANT 14 — every site that decides "is this the entry?" goes
+    through here, in all three relays. See invariant 14 in
+    ``frontend/src/lib/refresh/CLAUDE.md``; pinned by
+    ``test-vectors/relay/vault-entry-lookup.json``.
+
+    ``instance_key`` arrives normalized: an absent, ``None`` or ``""`` selector
+    is the provider-DEFAULT lookup, spelled ``""`` here.
+
+    On the entry side, a ``metadata.instance_key`` that is absent or ``None``
+    means the default slot, so it compares equal to ``""``. A non-``str``,
+    non-``None`` value (number, bool, list, dict) is a foreign value the format
+    permits but no writer produces: that entry is neither the default card nor
+    any named card, so no lookup ever returns it. It is unreachable, not an
+    error — the same way any missing entry falls through.
+    """
+    if not isinstance(entry, dict) or entry.get("provider") != provider:
+        return False
+    meta = entry.get("metadata")
+    ek = meta.get("instance_key") if isinstance(meta, dict) else None
+    if ek is None:
+        return instance_key == ""
+    if not isinstance(ek, str):
+        return False
+    return ek == instance_key
+
+
 @dataclass
 class Vault:
     """A decrypted vault document plus the params needed to write it back."""
@@ -229,15 +258,9 @@ class Vault:
         self, provider: str, instance_key: str | None = None
     ) -> dict[str, Any] | None:
         """Find the entry for (provider, instance_key); mirrors findEntry."""
+        key = instance_key or ""
         for entry in self.doc.get("entries", []):
-            if entry.get("provider") != provider:
-                continue
-            meta = entry.get("metadata") or {}
-            ek = meta.get("instance_key") if isinstance(meta, dict) else None
-            if not instance_key:  # default card: None or ""
-                if not ek:
-                    return entry
-            elif ek == instance_key:
+            if _entry_matches(entry, provider, key):
                 return entry
         return None
 
