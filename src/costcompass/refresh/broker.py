@@ -75,8 +75,10 @@ _TRANSIENT = {
     "broker_unreachable",
     "service_unavailable",
     "broker_timeout",
+    # Same disposition as the `internal_error` it replaces.
+    "unexpected_status",
 }
-# Codes the broker itself can send. The three synthesized 5xx codes are
+# Codes the broker itself can send. Every client-synthesized code is
 # deliberately absent: if one ever arrived in an envelope it would fall
 # through to _STATUS_TO_CODE, which is where it belongs.
 _KNOWN_CODES = {
@@ -628,12 +630,18 @@ class BrokerClient:
             envelope = {}
         err = envelope.get("error") or {}
         raw_code = err.get("code")
+        # Not "internal_error": that is the broker's own code for "bug in
+        # broker", and reusing it here would make our failure to read a response
+        # indistinguishable from a fault the broker admitted.
         code = (
             raw_code
             if raw_code in _KNOWN_CODES
-            else _STATUS_TO_CODE.get(resp.status_code, "internal_error")
+            else _STATUS_TO_CODE.get(resp.status_code, "unexpected_status")
         )
-        message = err.get("message") or f"broker {resp.status_code}"
+        # An unrecognized code lost its meaning above; keep it in the message so
+        # the protocol break leaves a trace. Same format the browser emits.
+        suffix = f" ({raw_code})" if isinstance(raw_code, str) and raw_code else ""
+        message = err.get("message") or f"broker {resp.status_code}{suffix}"
         retry_after = parse_retry_after(resp.headers.get("retry-after"))
         request_id = err.get("request_id")
         return BrokerError(

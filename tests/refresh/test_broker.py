@@ -224,6 +224,57 @@ def test_bodyless_gateway_status_does_not_name_broker_internals(status, code):
     assert exc.value.is_transient()
 
 
+@pytest.mark.parametrize("status", [500, 418])
+def test_unguessable_status_is_unexpected_status(status):
+    # "internal_error" is the broker's own code for "bug in broker". A relay
+    # that cannot read the response must not borrow it, or a protocol break
+    # between two implementations that must agree becomes indistinguishable
+    # from a fault the broker reported and admitted.
+    client = make_broker(lambda r: httpx.Response(status, content=b"not json at all"))
+    with pytest.raises(broker.BrokerError) as exc:
+        client.forward({"target": {}, "headers": {}})
+    assert exc.value.code == "unexpected_status"
+    assert exc.value.http_status == status
+    # Same disposition the internal_error it replaces already had.
+    assert exc.value.is_transient()
+
+
+def test_broker_authored_internal_error_survives():
+    client = make_broker(
+        lambda r: httpx.Response(
+            500, json={"error": {"code": "internal_error", "message": "boom"}}
+        )
+    )
+    with pytest.raises(broker.BrokerError) as exc:
+        client.forward({"target": {}, "headers": {}})
+    assert exc.value.code == "internal_error"
+    assert str(exc.value) == "boom"
+
+
+def test_unrecognized_code_survives_in_the_message():
+    # An unrecognized code still guesses from the status — that guess carries
+    # the right retry disposition, which the unknown code cannot supply — but
+    # the raw code must survive in the message so the break leaves a trace.
+    client = make_broker(
+        lambda r: httpx.Response(500, json={"error": {"code": "weird_thing"}})
+    )
+    with pytest.raises(broker.BrokerError) as exc:
+        client.forward({"target": {}, "headers": {}})
+    assert exc.value.code == "unexpected_status"
+    assert str(exc.value) == "broker 500 (weird_thing)"
+
+
+def test_unrecognized_code_on_a_guessable_status_keeps_that_guess():
+    # The status guess, not the new code, because it carries the retry
+    # disposition: a 429 is still a rate limit whatever the envelope calls it.
+    client = make_broker(
+        lambda r: httpx.Response(429, json={"error": {"code": "weird_thing"}})
+    )
+    with pytest.raises(broker.BrokerError) as exc:
+        client.forward({"target": {}, "headers": {}})
+    assert exc.value.code == "rate_limited"
+
+
 def test_envelope_bearing_503_still_names_the_worker_pool():
     client = make_broker(
         lambda r: httpx.Response(

@@ -94,6 +94,29 @@
       }
     },
     {
+      "name": "a relay that could not read the response still relays what it saw",
+      "request": {
+        "url": "https://api.example.com/usage",
+        "purpose": "usage"
+      },
+      "error": {
+        "code": "unexpected_status",
+        "http_status": 500,
+        "message": "broker 500",
+        "request_id": null
+      },
+      "expect": {
+        "kind": "relayed",
+        "status": 500,
+        "request_url": "https://api.example.com/usage",
+        "request_purpose": "usage",
+        "body_b64": "dW5leHBlY3RlZF9zdGF0dXM6IGJyb2tlciA1MDA=",
+        "signature": null,
+        "headers": {},
+        "synthetic": true
+      }
+    },
+    {
       "name": "an unmapped client-synthesized code falls back to 500, not 502",
       "request": {
         "url": "https://api.example.com/usage",
