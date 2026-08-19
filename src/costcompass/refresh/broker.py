@@ -155,7 +155,12 @@ def _header_ci(headers: dict[str, str], name: str) -> str | None:
 
 
 def provider_error_response(
-    status: int, purpose: str, detail: str, *, error_code: str | None = None
+    status: int,
+    purpose: str,
+    detail: str,
+    *,
+    error_code: str | None = None,
+    error_reason: str | None = None,
 ) -> dict[str, Any]:
     """An UNSIGNED, NON-SYNTHETIC provider-error response the App Server's
     status taxonomy can classify (429 → rate_limited, 5xx → transient, …). No
@@ -167,12 +172,19 @@ def provider_error_response(
     body, so an OAuth mint rejection (409) must pass ``error_code`` — otherwise
     a message-only body is misfiled as a generic failure. This mirrors the
     ``{"error":{"code":…}}`` envelope the browser relays verbatim from the
-    oauth-broker."""
+    oauth-broker.
+
+    ``error_reason`` narrows that code (e.g. ``rotation_lost`` for a rotated
+    refresh-token that could not be saved). The App Server keys on it to word
+    the card; a server older than this client ignores it and falls back to the
+    generic sentence, which is why it is a sub-field and not a new code."""
     payload: dict[str, Any] = (
         {"error": {"code": error_code, "message": detail}}
         if error_code
         else {"error": detail}
     )
+    if error_code and error_reason:
+        payload["error"]["reason"] = error_reason
     body = base64.b64encode(json.dumps(payload).encode()).decode("ascii")
     return {
         "request_url": "cc-internal://cli-refresh",

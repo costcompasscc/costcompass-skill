@@ -1283,6 +1283,8 @@ def test_oauth_mint_409_marks_body_reauth_required():
     assert r["status"] == 409  # preserved from the mint
     body = json.loads(base64.b64decode(r["body_b64"]))
     assert body["error"]["code"] == "reauth_required"
+    # A mint rejection is an ordinary expiry — no reason narrows it.
+    assert "reason" not in body["error"]
     assert result.outcomes[0].state == "reauth_required"
 
 

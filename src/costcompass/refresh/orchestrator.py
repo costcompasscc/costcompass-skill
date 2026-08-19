@@ -796,6 +796,7 @@ def _process_entry(
                     _entry_purpose(plan) or "missing_credentials",
                     str(exc),
                     error_code=error_code,
+                    error_reason=exc.reason,
                 )
             ],
             fallback_state="failed",

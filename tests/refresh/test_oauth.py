@@ -242,6 +242,54 @@ def test_resolver_write_back_failure_raises_oauth_error():
     # 409 so the orchestrator tags the body reauth_required: the old token is
     # dead upstream, so an unsaved rotation is a dead grant, not a blip.
     assert exc.value.status == 409
+    # But NOT rotation_lost. The vault is unreadable here (GET 404), so we
+    # never saw what it holds — the rotated token could be in the document we
+    # cannot read, saved by a sibling relay. Silence is not evidence, so the
+    # card gets the generic wording instead of "refreshing will never help".
+    assert exc.value.reason is None
+
+
+def test_resolver_write_back_ambiguous_failure_makes_no_lost_claim():
+    # A 500 (or any transport failure) can arrive AFTER the server committed
+    # the vault write, in which case the rotated token is durable and the grant
+    # is healthy. We cannot tell from here, so the card must not be told
+    # "refreshing will not fix it" — that would drive a needless reconnect of a
+    # working connection. Only the revision conflict above proves a lost write.
+    def oauth_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "access_token": "at",
+                "expires_at_utc_secs": 9999,
+                "refresh_token": "rt-new",
+            },
+        )
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PUT":
+            return httpx.Response(500, json={"error": "boom"})
+        return httpx.Response(404)
+
+    oauth_client = oauth.OAuthBrokerClient(
+        "https://x/oauth/v1",
+        "sk",
+        http=httpx.Client(transport=httpx.MockTransport(oauth_handler)),
+    )
+    api_client = api.Client(
+        "https://x/api/v1",
+        "sk",
+        http=httpx.Client(transport=httpx.MockTransport(api_handler)),
+    )
+    resolver = oauth.OAuthResolver(
+        oauth_client, api_client, _vault_with_sentinel("rt-old"), PASSWORD
+    )
+    with pytest.raises(oauth.OAuthError, match="could not save it") as exc:
+        resolver.access_token("google", "__google_oauth__", "/google/mint")
+    # Still a 409 reauth: the card should ask for a reconnect either way.
+    assert exc.value.status == 409
+    # But no reason, so the App Server keeps the generic "connection expired"
+    # sentence rather than asserting nothing can recover it.
+    assert exc.value.reason is None
 
 
 # ---- rotation write-back: revision-conflict retry ----------------------
@@ -252,6 +300,65 @@ def test_resolver_write_back_failure_raises_oauth_error():
 # here rather than pass by luck on a slow machine.
 
 NO_JITTER = {"sleep": lambda _s: None, "random": lambda: 0.0}
+
+
+def test_rotation_write_back_confirmed_loss_claims_rotation_lost():
+    # The one state that earns the claim: every write is rejected AND every
+    # reload still shows the OLD token. The upstream killed that token when it
+    # issued the replacement we could not save, so the grant really is dead.
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PUT":
+            return httpx.Response(409, json={"error": "revision conflict"})
+        return httpx.Response(200, json=_vault_blob("rt-old", 11))
+
+    resolver = _rotating_resolver(api_handler)
+    with pytest.raises(oauth.OAuthError) as exc:
+        resolver._persist_rotated_sentinel(
+            "google", "__google_oauth__", "rt-old", "rt-new", **NO_JITTER
+        )
+    assert exc.value.status == 409
+    assert exc.value.reason == "rotation_lost"
+
+
+def test_rotation_write_back_final_conflict_sees_our_token_saved():
+    # Without the last-attempt reload this reported a dead grant while a
+    # sibling relay's identical save sat in the vault — the very case every
+    # earlier attempt already treats as success.
+    gets = []
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PUT":
+            return httpx.Response(409, json={"error": "revision conflict"})
+        gets.append(1)
+        last = len(gets) >= oauth.ROTATION_PERSIST_ATTEMPTS
+        return httpx.Response(
+            200, json=_vault_blob("rt-new" if last else "rt-old", 10 + len(gets))
+        )
+
+    resolver = _rotating_resolver(api_handler)
+    outcome = resolver._persist_rotated_sentinel(
+        "google", "__google_oauth__", "rt-old", "rt-new", **NO_JITTER
+    )
+    # PERSISTED, not a dead grant: the vault denotes the token we minted.
+    assert outcome is oauth.RotationPersistOutcome.PERSISTED
+    assert len(gets) == oauth.ROTATION_PERSIST_ATTEMPTS
+
+
+def test_rotation_write_back_unreadable_vault_makes_no_claim():
+    # Silence, not evidence: the rotated token may be in the document we cannot
+    # read. Ask for a reconnect, but never call the grant dead.
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PUT":
+            return httpx.Response(409, json={"error": "revision conflict"})
+        return httpx.Response(500, json={"error": "boom"})
+
+    resolver = _rotating_resolver(api_handler)
+    with pytest.raises(oauth.OAuthError) as exc:
+        resolver._persist_rotated_sentinel(
+            "google", "__google_oauth__", "rt-old", "rt-new", **NO_JITTER
+        )
+    assert exc.value.status == 409
+    assert exc.value.reason is None
 
 
 def _rotating_resolver(api_handler, *, sentinel="rt-old", vault=None):
@@ -676,6 +783,9 @@ def test_mint_409_is_reauth():
     with pytest.raises(oauth.OAuthError, match="reconnect") as exc:
         client.mint("/google/mint", "rt")
     assert exc.value.status == 409  # preserved → server records reauth_required
+    # An ordinary expiry carries no reason: reconnecting is the fix, and the
+    # generic "connection expired" sentence is the honest one.
+    assert exc.value.reason is None
 
 
 def _vault_blob(refresh_token="rt-old", revision=4, *, entries=None):

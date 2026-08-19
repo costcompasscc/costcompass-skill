@@ -259,6 +259,38 @@ def test_provider_error_response_reauth_code_in_body():
     assert body["error"]["code"] == "reauth_required"
     assert body["error"]["message"] == "OAuth credential rejected"
     assert b"reauth_required" in base64.b64decode(r["body_b64"])
+    # No reason passed → the field is absent, which is what an App Server older
+    # than this client sees and what it already knows how to handle.
+    assert "reason" not in body["error"]
+
+
+def test_provider_error_response_carries_the_reason_sub_field():
+    # `rotation_lost` narrows reauth_required to the variety no refresh can
+    # recover. It rides as a SUB-FIELD of the existing envelope so a server
+    # that predates it still keys on `code` instead of failing to classify.
+    r = broker.provider_error_response(
+        409,
+        "usage",
+        "could not save it",
+        error_code="reauth_required",
+        error_reason="rotation_lost",
+    )
+    body = json.loads(base64.b64decode(r["body_b64"]))
+    assert body["error"] == {
+        "code": "reauth_required",
+        "message": "could not save it",
+        "reason": "rotation_lost",
+    }
+
+
+def test_provider_error_response_reason_needs_a_code():
+    # The codeless envelope is a bare string, with nowhere to hang a reason —
+    # so a reason without a code is dropped rather than changing the shape.
+    r = broker.provider_error_response(
+        502, "usage", "boom", error_reason="rotation_lost"
+    )
+    body = json.loads(base64.b64decode(r["body_b64"]))
+    assert body == {"error": "boom"}
 
 
 def test_network_error():

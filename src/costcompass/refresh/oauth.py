@@ -119,7 +119,15 @@ def _conflict_backoff_secs(attempt: int, random: Callable[[], float]) -> float:
     return (0.05 + attempt * 0.1) * (0.5 + random())
 
 
-def _rotation_persist_failed(provider: str, cause: Exception) -> OAuthError:
+#: ``error.reason`` marking a 409 the user cannot refresh their way out of:
+#: the rotated refresh-token was never saved, and the upstream invalidated the
+#: one we still hold the moment it issued the replacement.
+ROTATION_LOST_REASON = "rotation_lost"
+
+
+def _rotation_persist_failed(
+    provider: str, cause: Exception, *, confirmed_lost: bool = False
+) -> OAuthError:
     """The error raised when a rotated refresh-token could not be saved.
 
     Status 409 so the orchestrator tags the body with ``reauth_required`` and
@@ -129,12 +137,30 @@ def _rotation_persist_failed(provider: str, cause: Exception) -> OAuthError:
     the user must reconnect. Reporting it as a transient 502 (the old
     behaviour) hid a permanently broken connection behind a generic error
     until some later refresh happened to surface it.
+
+    ``confirmed_lost`` attaches :data:`ROTATION_LOST_REASON`, which the card
+    repeats as "refreshing will not fix it". Only ONE state earns that claim:
+    the write was rejected AND a re-read of the server's document still shows
+    the OLD token. A rejected write alone does not — the retry path exists
+    precisely because the rotated token may be in the vault anyway, saved by a
+    sibling relay, in which case the grant is healthy and reporting it dead
+    would cost the user a needless reauthorization.
+
+    Everything else is unproven: a transport error can arrive after the server
+    committed, and a vault we cannot re-read tells us nothing at all. Those
+    omit the reason and fall back to the generic "connection expired" wording,
+    which still asks for a reconnect without asserting that nothing can work.
+
+    Defaults to ``False`` so a raise site that says nothing under-claims. The
+    failure mode of the safe default is a too-mild message; the failure mode of
+    the other default is telling a user their working connection is dead.
     """
     return OAuthError(
         f"rotated the refresh-token for '{provider}' but could not save it "
         f"({cause}). The previous token is no longer valid upstream, so the "
         f"connection must be reconnected.",
         status=409,
+        reason=ROTATION_LOST_REASON if confirmed_lost else None,
     )
 
 
@@ -147,18 +173,25 @@ class OAuthError(Exception):
     preservation. The orchestrator relays it as a non-synthetic provider-error
     so a 429 isn't mislabelled as a 401 reauth (and vice-versa). Defaults to
     401 — the "you need to (re)connect" case.
+
+    ``reason`` narrows a 409 beyond ``reauth_required`` for the App Server,
+    which uses it to word the card. Only :data:`ROTATION_LOST_REASON` is
+    defined today; ``None`` (every other raise site) reads as the ordinary
+    expiry it already was.
     """
 
-    def __init__(self, message: str, *, status: int = 401) -> None:
+    def __init__(
+        self, message: str, *, status: int = 401, reason: str | None = None
+    ) -> None:
         super().__init__(message)
         self.status = status
+        self.reason = reason
 
 
 def oauth_url_from_api(api_url: str) -> str:
     """`https://host/api/v1` -> `https://host/oauth/v1`."""
     base = api_url.rstrip("/")
-    if base.endswith("/api/v1"):
-        base = base[: -len("/api/v1")]
+    base = base.removesuffix("/api/v1")
     return f"{base}/oauth/v1"
 
 
@@ -631,13 +664,22 @@ class OAuthResolver:
                 self._adopt(candidate)
                 return RotationPersistOutcome.PERSISTED
             except api.VaultRevisionConflict as exc:
-                if attempt >= attempts - 1:
-                    raise _rotation_persist_failed(provider, exc) from exc
-                sleep(_conflict_backoff_secs(attempt, random))
+                # The LAST attempt re-reads too, and that is the whole point:
+                # a rejected write says our copy lost the race, never that the
+                # rotated token is absent. Every earlier attempt already
+                # resolves that by looking, and one that skipped the look would
+                # report a grant dead while a sibling relay's identical save
+                # sat in the vault. Only the backoff is skipped — there is no
+                # further attempt to space out, and waiting to see a write land
+                # would be a delay standing in for a guarantee.
+                last_attempt = attempt >= attempts - 1
+                if not last_attempt:
+                    sleep(_conflict_backoff_secs(attempt, random))
                 if not self._reload_vault():
                     # Can't see the server's current document, so there is
                     # nothing to re-apply onto — retrying would just replay
-                    # the same stale revision.
+                    # the same stale revision. Unproven, not confirmed lost:
+                    # an unreadable vault is silence, not evidence.
                     raise _rotation_persist_failed(provider, exc) from exc
                 observed = self._sentinel_token(provider, sentinel_key)
                 if observed == rotated:
@@ -679,6 +721,15 @@ class OAuthResolver:
                         if observed is None
                         else RotationPersistOutcome.SUPERSEDED
                     )
+                if last_attempt:
+                    # Rejected write, retries spent, and the vault still holds
+                    # the token we minted FROM. The upstream killed that one
+                    # when it issued the replacement we could not save, so the
+                    # grant is dead and no refresh will revive it. This is the
+                    # only state that has earned the claim.
+                    raise _rotation_persist_failed(
+                        provider, exc, confirmed_lost=True
+                    ) from exc
             except (api.ApiError, vault_mod.VaultError) as exc:
                 raise _rotation_persist_failed(provider, exc) from exc
         # Unreachable for any sane budget: the final attempt either returns or
