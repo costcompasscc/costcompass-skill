@@ -212,6 +212,62 @@ class OAuthBrokerClient:
                 "oauth-broker returned a non-JSON response", status=502
             ) from exc
 
+    def mint_from_grant(self, path: str, envelope: Any) -> str:
+        """Second leg of an ``oauth_installation_grant``: exchange an
+        App-Server grant envelope for a short-lived provider token.
+
+        ``envelope`` is forwarded VERBATIM — it carries a signature the broker
+        verifies against the authenticated user, so this relay reads nothing
+        out of it and reshapes nothing in it. Combined with a server-authored
+        ``path``, that opacity is what keeps the whole mechanism free of
+        provider knowledge on this side.
+
+        Kept separate from ``mint`` rather than folded into it: that one sends
+        a refresh-token sentinel and may receive a rotated one to write back to
+        the vault, and neither half applies here. Sharing a body-shaping
+        parameter between them would put a ``refresh_token`` field this call
+        must never send within a flag's reach of the call that must always
+        send it.
+        """
+        try:
+            resp = self._http.post(
+                f"{self.base_url}{path}", headers=self._headers, json=envelope
+            )
+        except httpx.RequestError as exc:
+            raise OAuthError(
+                f"could not reach oauth-broker: {exc}", status=502
+            ) from exc
+        if resp.status_code in (401, 409):
+            # Same taxonomy as ``mint``: 401 = caller auth, 409 = the provider
+            # rejected the exchange. A grant this relay just obtained should not
+            # be refused, so either means the connection needs the user.
+            raise OAuthError(
+                "OAuth credential rejected — reconnect this provider in the app.",
+                status=resp.status_code,
+            )
+        if resp.status_code >= 400:
+            # Never echo the broker's error body — it may carry the upstream
+            # token-exchange response.
+            raise OAuthError(
+                f"installation mint failed ({resp.status_code})",
+                status=resp.status_code,
+            )
+        try:
+            payload = resp.json()
+        except ValueError as exc:
+            raise OAuthError(
+                "oauth-broker returned a non-JSON response", status=502
+            ) from exc
+        token = (payload or {}).get("access_token") or ""
+        if not token:
+            # An empty token would sail on and fail at the provider as an
+            # opaque 401, so it is rejected here where the cause is still known.
+            raise OAuthError(
+                "oauth-broker returned no access_token for the installation grant",
+                status=502,
+            )
+        return str(token)
+
 
 class OAuthResolver:
     """Mints + caches access tokens per provider for one refresh run, and
@@ -340,6 +396,63 @@ class OAuthResolver:
         """
         with self._sentinel_lock(provider, sentinel_key):
             return self._resolve_access_token(provider, sentinel_key, mint_path)
+
+    def installation_token(
+        self, provider: str, instance_key: str, grant_path: str, mint_path: str
+    ) -> str:
+        """Resolve an ``oauth_installation_grant`` credential: App-Server
+        grant, then broker mint.
+
+        ``grant_path`` and ``mint_path`` are server-authored (the entry's
+        credential routing) and the envelope between them is opaque, so this
+        method holds no provider knowledge — the same property every other
+        resolution here has, and the reason the CLI can serve the kind without
+        a provider table.
+
+        Shares the run's lock table and token cache with ``access_token``,
+        keyed by ``(provider, instance_key)`` rather than by a sentinel: the
+        token is scoped to ONE installation, so two rows must never share one.
+        The key spaces cannot collide — a sentinel key is a vault entry id
+        (``__github_oauth__``) and an instance key is a card id — and both are
+        provider-prefixed anyway.
+
+        The grant itself is deliberately not cached: it lives ~60s and binds a
+        single installation, so caching it would trade one cheap call for a
+        class of expiry bugs. The TOKEN is cached, but only for this run —
+        which is the whole of its safe lifetime. A cache that outlived the run
+        would skip the App Server's re-check that the row is still enabled and
+        still bound to the same installation, and an org keeps its login (the
+        instance key) across an uninstall/reinstall of the App while gaining a
+        NEW installation_id. The browser reaches the same guarantee by not
+        caching at all: it resolves each entry once per run, so it has no
+        second caller to serve.
+
+        No rotation and no abort handling, unlike ``access_token``: there is no
+        long-lived sentinel behind this kind to rotate or to vanish mid-run.
+        """
+        with self._sentinel_lock(provider, instance_key):
+            key = self._abort_key(provider, instance_key)
+            if key in self._access_cache:
+                return self._access_cache[key]
+            try:
+                envelope = self._api.post_for_opaque_json(
+                    grant_path, {"instance_key": instance_key}
+                )
+            except api.ApiError as exc:
+                # The App Server refuses a grant for a row it cannot vouch for
+                # — 404 when the card is gone or disabled, 503 when its stored
+                # configuration is incomplete — and the relay cannot fix either
+                # by retrying. Carry the real status through so the server
+                # classifies the failure by what actually happened; a
+                # connectivity failure has no status and reads as 502, the same
+                # "could not reach the tier" verdict ``mint`` uses.
+                raise OAuthError(
+                    f"could not obtain an installation grant: {exc}",
+                    status=exc.status or 502,
+                ) from exc
+            token = self._oauth.mint_from_grant(mint_path, envelope)
+            self._access_cache[key] = token
+            return token
 
     def _resolve_access_token(
         self, provider: str, sentinel_key: str, mint_path: str

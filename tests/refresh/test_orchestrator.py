@@ -494,32 +494,81 @@ def test_oauth_mint_routing_passes_server_sentinel_and_path():
     }
 
 
-def test_oauth_installation_grant_routing_raises_credential_skip():
-    # The server routes an Organization App row to "oauth_installation_grant",
-    # a kind the CLI doesn't implement — skip it cleanly (no provider knowledge
-    # in the untrusted relay; it acts purely on the server-authored routing kind).
+def test_oauth_installation_grant_resolves_through_both_server_authored_legs():
+    # The server routes an Organization App row to "oauth_installation_grant".
+    # This relay used to skip the kind outright, which meant a scheduled
+    # refresh silently froze such a card forever.
     #
-    # Deliberately UNMARKED: this branch must be decided before the
-    # subscription_only read, because it is a documented limit of this client
-    # rather than a statement about the card. Marking it would hide a reordering.
+    # What is pinned is that BOTH legs arrive as routing data: the resolver
+    # hands the resolver-layer exactly what the entry named and nothing it
+    # composed itself. No provider knowledge enters the untrusted relay.
     v = vault.Vault(
         doc={"entries": []},
         p2s=os.urandom(16),
         p2c=vault.DEFAULT_PBKDF2_ITERS,
         revision=1,
     )
+    seen = {}
+
+    class FakeResolver:
+        def installation_token(self, provider, instance_key, grant_path, mint_path):
+            seen.update(
+                provider=provider,
+                instance_key=instance_key,
+                grant_path=grant_path,
+                mint_path=mint_path,
+            )
+            return "ghs_tok"
+
     entry = {
         "provider_id": "github",
         "instance_key": "acct-1",
         "plan": {},
-        "credential": {"kind": "oauth_installation_grant"},
+        "credential": {
+            "kind": "oauth_installation_grant",
+            "grant_path": "/integrations/github/installation-mint-grant",
+            "mint_path": "/github/mint/installation",
+        },
     }
-    with pytest.raises(orchestrator.CredentialSkip, match="installation grant") as exc:
-        orchestrator._resolve_credential(entry, v, None)
-    # Same category as any other kind this relay doesn't implement, so the same
-    # server-recognised marker — the reason the App Server persists is what tells
-    # triage "old client", and no_credentials persists nothing at all.
-    assert exc.value.reason == orchestrator.SKIP_UNSUPPORTED_KIND
+    assert orchestrator._resolve_credential(entry, v, FakeResolver()) == "ghs_tok"
+    assert seen == {
+        "provider": "github",
+        "instance_key": "acct-1",
+        "grant_path": "/integrations/github/installation-mint-grant",
+        "mint_path": "/github/mint/installation",
+    }
+
+
+@pytest.mark.parametrize("missing", ["grant_path", "mint_path"])
+def test_malformed_installation_grant_routing_fails_rather_than_skips(missing):
+    # The mirror of the malformed oauth_mint case, and the distinction that
+    # matters: this relay DOES implement the kind, so routing that names it and
+    # omits a leg is a server defect. Filing it as unsupported_credential_kind
+    # would tell the user to update a client that is already current — advice
+    # no release can make true.
+    #
+    # Deliberately UNMARKED, so a reordering that let the subscription_only
+    # read reach this card would change the verdict and fail here.
+    v = vault.Vault(
+        doc={"entries": []},
+        p2s=os.urandom(16),
+        p2c=vault.DEFAULT_PBKDF2_ITERS,
+        revision=1,
+    )
+    routing = {
+        "kind": "oauth_installation_grant",
+        "grant_path": "/integrations/github/installation-mint-grant",
+        "mint_path": "/github/mint/installation",
+    }
+    del routing[missing]
+    entry = {
+        "provider_id": "github",
+        "instance_key": "acct-1",
+        "plan": {},
+        "credential": routing,
+    }
+    with pytest.raises(orchestrator.CredentialMissing, match="installation_grant"):
+        orchestrator._resolve_credential(entry, v, object())
 
 
 def test_unknown_future_kind_skips_regardless_of_the_marker():

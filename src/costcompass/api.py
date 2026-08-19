@@ -195,6 +195,26 @@ class Client:
                 ) from exc
             raise
 
+    # --- credential grants ----------------------------------------------
+
+    def post_for_opaque_json(self, path: str, body: dict[str, Any]) -> Any:
+        """POST to a SERVER-AUTHORED path and return the reply's raw JSON.
+
+        The one caller today is the first leg of an
+        ``oauth_installation_grant`` (``OAuthResolver.installation_token``),
+        whose reply is a signed envelope this client must forward to the
+        oauth-broker unchanged. Returning the parsed JSON as-is is the point:
+        the envelope's shape belongs to the App Server and the broker, and
+        reshaping it here could only invalidate the signature computed over
+        it. It is also what keeps the caller free of provider knowledge, since
+        nothing about the payload is read.
+
+        ``path`` comes from the run's credential routing and is never
+        assembled locally; the API key authenticates it exactly as it does
+        every other call here.
+        """
+        return self._json("POST", path, json=body)
+
     # --- fetch runs -----------------------------------------------------
 
     def create_fetch_run(

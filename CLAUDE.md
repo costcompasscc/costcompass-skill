@@ -112,15 +112,25 @@ only fixes is a patch bump.
   provider id literal. **Credential routing is server-authored**: each
   fetch-run entry carries a `credential` object
   (`{kind: "vault_key" | "oauth_mint" | "oauth_installation_grant",
-  sentinel_key?, mint_path?}`) the App Server builds from the plugin's
-  `credential_routing()`. The CLI executes the kinds it implements (direct
-  vault entry first, then `oauth_mint`) and skips any other kind with an
+  sentinel_key?, mint_path?, grant_path?}`) the App Server builds from the
+  plugin's `credential_routing()`. The CLI executes every kind above (direct
+  vault entry first, then `oauth_mint`, then the two-leg
+  `oauth_installation_grant`) and skips any kind it does not know with an
   `unsupported_credential_kind` synthetic — decided by the kind alone, never
   by the `subscription_only` marker, which answers a question about
   `vault_key` cards only. Adding an OAuth provider — or a new credential
   variant — never touches this tree, and a mechanism that ships on the server
   before this independently-versioned client learns it costs the user a quiet
   skip rather than a false "no credential configured" failure.
+
+  `oauth_installation_grant` is the case that shows what "shape only" buys.
+  It needs an extra App-Server round trip before the broker will mint, which
+  reads as provider-specific until you notice the relay never looks inside the
+  envelope it carries. Expressed as two paths the server authors (`grant_path`,
+  then `mint_path`) it is just another shape, and this tree runs it with no
+  idea GitHub is on the other end. A kind that seems to need a provider branch
+  here is the signal to go looking for its routing-data form, not to add the
+  branch.
 - **Security.** Never log the vault password, decrypted keys, minted tokens,
   or the API key. The decrypted vault stays in process memory only — never
   written to disk. Neither secret is ever accepted as an argv value.
@@ -174,14 +184,12 @@ login keychain — which has already happened once.
   auto-discovery). The CLI skips it and relies on already-configured cards — a
   google card set up in the app refreshes fine; a brand-new project the CLI has
   never seen won't be auto-discovered.
-- **GitHub Organization-App (installation) rows are unsupported.** They need
-  an App-Server-issued mint grant, not a vault refresh-token sentinel. The CLI
-  doesn't special-case them — the App Server routes such rows to
-  `credential.kind == "oauth_installation_grant"`, a kind the CLI doesn't
-  implement, so the generic credential resolver **skips it cleanly** (an
-  `unsupported_credential_kind` synthetic → benign `skipped`) and prints a note to refresh
-  that card from the app. PAT cards (direct vault entry) and User-App cards
-  (`oauth_mint`) work.
+
+GitHub Organization-App (installation) rows were listed here as unsupported.
+They are not, and no credential kind is web-only any more — see the
+`oauth_installation_grant` note under "No plugin-id branching" above. All
+three GitHub row shapes refresh: PAT (direct vault entry), User App
+(`oauth_mint`), and Organization App (the two-leg grant).
 
 ## Tests
 

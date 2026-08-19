@@ -429,16 +429,36 @@ def _resolve_credential(
             raise CredentialSkip(str(exc), reason=SKIP_FOR_ABORT[exc.outcome]) from exc
 
     if kind == "oauth_installation_grant":
-        # A documented scope limit of this client, not a vault problem: the
-        # grant is App-Server-issued and only the web app can mint it. Decided
-        # BEFORE the marker read below for exactly that reason — the card is
-        # fine, this relay simply cannot serve it. Same marker as any other
-        # kind this relay doesn't implement: one concept, one reason.
-        raise CredentialSkip(
-            "this card needs an App-Server-issued installation grant the CLI "
-            "can't mint — refresh it from the web app",
-            reason=SKIP_UNSUPPORTED_KIND,
-        )
+        # Two-leg mint: POST this row's instance_key to the App Server at
+        # ``grant_path`` for a signed envelope, then forward that envelope
+        # verbatim to the oauth-broker at ``mint_path``. Both paths arrive as
+        # routing data and the envelope is opaque, so this branch — like every
+        # other one here — knows nothing about which provider it is serving.
+        # That is what let this relay implement the kind at all: the mechanism
+        # looked provider-specific only while the browser was expressing it as
+        # provider-specific code.
+        grant_path = routing.get("grant_path")
+        mint_path = routing.get("mint_path")
+        if not (grant_path and mint_path):
+            # Same reasoning as the malformed oauth_mint routing above, and
+            # deliberately NOT the ``unsupported_credential_kind`` skip below:
+            # this relay does implement the kind, so routing that names it and
+            # withholds a leg is a server defect. Reporting it as "this client
+            # is too old" would send the user after an update that can never
+            # arrive.
+            raise CredentialMissing(
+                f"malformed oauth_installation_grant routing for '{provider}' — "
+                "missing grant_path or mint_path; check the plugin's "
+                "credential_routing() override"
+            )
+        if resolver is None:
+            # Same wiring defect as the oauth_mint arm: the server says a
+            # credential exists and this run has nothing that can obtain it.
+            raise CredentialMissing(
+                f"oauth_installation_grant routing for '{provider}' but this run "
+                "has no OAuth resolver — the credential cannot be minted"
+            )
+        return resolver.installation_token(provider, instance, grant_path, mint_path)
 
     if kind is not None and kind != "vault_key":
         # A kind the server shipped before this client learned it — the normal

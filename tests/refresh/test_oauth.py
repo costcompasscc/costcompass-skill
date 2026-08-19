@@ -1127,3 +1127,148 @@ def test_a_reload_that_failed_is_never_ridden():
     assert resolver._vault.entry_for("google", "__google_oauth__")["api_key"] == (
         "rt-fresh"
     )
+
+
+# --- installation grants (two legs) -------------------------------------
+
+
+def _installation_resolver(api_handler, oauth_handler):
+    """A resolver wired to two mock transports, with an empty vault.
+
+    Empty on purpose: this kind reads no sentinel and rotates nothing, so a
+    vault entry appearing in one of these tests would mean the wrong code path
+    ran.
+    """
+    v = vault.Vault(
+        doc={"entries": []},
+        p2s=os.urandom(16),
+        p2c=vault.DEFAULT_PBKDF2_ITERS,
+        revision=1,
+    )
+    return oauth.OAuthResolver(
+        oauth.OAuthBrokerClient(
+            "https://x/oauth/v1",
+            "sk",
+            http=httpx.Client(transport=httpx.MockTransport(oauth_handler)),
+        ),
+        api.Client(
+            "https://x/api/v1",
+            "sk",
+            http=httpx.Client(transport=httpx.MockTransport(api_handler)),
+        ),
+        v,
+        PASSWORD,
+    )
+
+
+# An envelope carrying a field this client has never heard of, to pin the
+# opacity: a relay that decoded it into a model would drop `future_leg` and
+# hand the broker a body its signature no longer covers.
+_ENVELOPE = {
+    "grant": {"provider": "github", "installation_id": "42", "future_leg": "x"},
+    "signature": "sig",
+}
+
+
+def test_installation_token_forwards_the_envelope_verbatim():
+    seen = {}
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        seen["grant_path"] = request.url.path
+        seen["grant_auth"] = request.headers.get("Authorization")
+        seen["grant_body"] = json.loads(request.content)
+        return httpx.Response(200, json=_ENVELOPE)
+
+    def oauth_handler(request: httpx.Request) -> httpx.Response:
+        seen["mint_path"] = request.url.path
+        seen["mint_auth"] = request.headers.get("Authorization")
+        seen["mint_body"] = json.loads(request.content)
+        return httpx.Response(200, json={"access_token": "ghs_tok"})
+
+    resolver = _installation_resolver(api_handler, oauth_handler)
+    token = resolver.installation_token(
+        "github",
+        "acme",
+        "/integrations/github/installation-mint-grant",
+        "/github/mint/installation",
+    )
+
+    assert token == "ghs_tok"
+    # Leg 1 went to the path the SERVER named, carrying only the row id, and
+    # authenticated with this relay's own programmatic API key.
+    assert seen["grant_path"] == "/api/v1/integrations/github/installation-mint-grant"
+    assert seen["grant_body"] == {"instance_key": "acme"}
+    assert seen["grant_auth"] == "Bearer sk"
+    # Leg 2 forwarded leg 1's reply VERBATIM — unknown field and all.
+    # Reshaping it here could only invalidate the signature the broker checks.
+    assert seen["mint_path"] == "/oauth/v1/github/mint/installation"
+    assert seen["mint_body"] == _ENVELOPE
+    assert seen["mint_auth"] == "Bearer sk"
+
+
+def test_installation_token_mints_once_per_row_and_separately_per_installation():
+    mints = []
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_ENVELOPE)
+
+    def oauth_handler(request: httpx.Request) -> httpx.Response:
+        mints.append(json.loads(request.content))
+        return httpx.Response(200, json={"access_token": f"ghs-{len(mints)}"})
+
+    resolver = _installation_resolver(api_handler, oauth_handler)
+    args = (
+        "/integrations/github/installation-mint-grant",
+        "/github/mint/installation",
+    )
+    first = resolver.installation_token("github", "acme", *args)
+    again = resolver.installation_token("github", "acme", *args)
+    other = resolver.installation_token("github", "other", *args)
+
+    # One mint per row, reused within the run…
+    assert first == again == "ghs-1"
+    # …but never shared across rows: an installation token is scoped to ONE
+    # installation, so reusing it would hand a card another org's token.
+    assert other == "ghs-2"
+    assert len(mints) == 2
+
+
+def test_installation_grant_failure_preserves_the_app_server_status():
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        # The card was removed or disabled between planning and resolution.
+        return httpx.Response(404, json={"detail": "not found"})
+
+    def oauth_handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("the broker must not be called without a grant")
+
+    resolver = _installation_resolver(api_handler, oauth_handler)
+    with pytest.raises(oauth.OAuthError) as exc:
+        resolver.installation_token(
+            "github",
+            "acme",
+            "/integrations/github/installation-mint-grant",
+            "/github/mint/installation",
+        )
+    # Carried through rather than flattened to 502: the server's own taxonomy
+    # classifies the failure by what actually happened.
+    assert exc.value.status == 404
+
+
+def test_installation_mint_rejects_an_empty_access_token():
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_ENVELOPE)
+
+    def oauth_handler(request: httpx.Request) -> httpx.Response:
+        # A 200 with nothing usable in it. Left alone this sails on and fails
+        # at the provider as an opaque 401, long after the cause is knowable.
+        return httpx.Response(200, json={"access_token": ""})
+
+    resolver = _installation_resolver(api_handler, oauth_handler)
+    with pytest.raises(oauth.OAuthError) as exc:
+        resolver.installation_token(
+            "github",
+            "acme",
+            "/integrations/github/installation-mint-grant",
+            "/github/mint/installation",
+        )
+    assert exc.value.status == 502
