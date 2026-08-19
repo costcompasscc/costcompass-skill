@@ -31,7 +31,7 @@ class ApiError(Exception):
         self.status = status
 
 
-def _is_ambiguous_failure(exc: ApiError) -> bool:
+def is_ambiguous_failure(exc: ApiError) -> bool:
     """Whether a failed mutation could still have committed server-side.
 
     The CLI's port of the browser's ``isAmbiguousMutationFailure``
@@ -43,6 +43,18 @@ def _is_ambiguous_failure(exc: ApiError) -> bool:
     ``status is None`` covers the connectivity failures ``_request`` maps
     from ``httpx.RequestError`` — a request that never got a status line
     cannot rule the commit out.
+
+    Public (it lost its leading underscore) because the rotation write-back
+    in ``refresh/oauth.py`` is a second caller in another module: an
+    ambiguous vault write reconciles against the server's document instead
+    of abandoning the grant. The status table is pinned equal across all
+    three relays by ``test-vectors/relay/ambiguous-failure.json``; the
+    non-status arms are language-specific and stay in each relay's own
+    tests.
+
+    Takes an ``ApiError`` by type, and that is the definite/ambiguous split
+    doing its own bookkeeping rather than a missing case: a ``VaultError``
+    is raised before anything is sent, so it can never be a candidate.
     """
     if exc.status is None:
         return True
@@ -257,7 +269,7 @@ class Client:
         try:
             return self._json("POST", path, json={"cancelled": cancelled})
         except ApiError as exc:
-            if not _is_ambiguous_failure(exc):
+            if not is_ambiguous_failure(exc):
                 raise
             time.sleep(FINALIZE_RETRY_DELAY_S)
             return self._json("POST", path, json={"cancelled": cancelled})

@@ -1,0 +1,101 @@
+{
+  "_comment": "HAND-WRITTEN corpus (the third one here that is not generated from the browser reference). It pins the STATUS half of \"could this failed mutation still have committed server-side?\" — the question a relay asks before deciding whether a failed vault write is worth reconciling against the server's document. Hand-written because no relay is the oracle: the browser's `isAmbiguousMutationFailure` carries arms the ports have no equivalent for (a CSRF refusal, a caller-initiated abort, the unknown-outcome 409), so generating `ambiguous` from it would dress one port up as the reference for a rule all three own equally. THE RULE: AMBIGUOUS means the server may have acted — no response at all, or a status it could return after the commit. DEFINITE means it answered before mutating, or never saw the request. A null `status` is the no-status-line case (a transport throw) and is ambiguous: a request that never got a status line cannot rule the commit out. SCOPE: statuses and the null case ONLY. Each relay's non-status arms are language-specific — the browser's `CsrfTokenMissingError`/`AbortError`/unknown-outcome-409, the CLI's `VaultError`, macOS's `.invalidKey` and its non-`APIError` fallthrough — and stay in that relay's own unit tests. Consumers: `isAmbiguousMutationFailure` (frontend/src/lib/idempotency.ts), `is_ambiguous_failure` (client/plugin/src/costcompass/api.py), `APIClient.isAmbiguousFailure` (client/macos/.../API/APIClient.swift).",
+  "vectors": [
+    {
+      "name": "status-none",
+      "why": "No status line at all — a transport throw. The request may have been received and committed before the connection died, so it cannot rule the commit out. This is the case the rotation write-back exists to recover.",
+      "status": null,
+      "ambiguous": true
+    },
+    {
+      "name": "status-400",
+      "why": "The server validated and refused before touching state. Nothing was written.",
+      "status": 400,
+      "ambiguous": false
+    },
+    {
+      "name": "status-401",
+      "why": "Rejected at the auth layer, before the handler ran.",
+      "status": 401,
+      "ambiguous": false
+    },
+    {
+      "name": "status-403",
+      "why": "Rejected at the auth layer, before the handler ran.",
+      "status": 403,
+      "ambiguous": false
+    },
+    {
+      "name": "status-404",
+      "why": "The server answered that the target does not exist; it did not mutate one.",
+      "status": 404,
+      "ambiguous": false
+    },
+    {
+      "name": "status-408",
+      "why": "The server gave up waiting on a request it may already have read in full.",
+      "status": 408,
+      "ambiguous": true
+    },
+    {
+      "name": "status-409",
+      "why": "An ordinary conflict is a definite refusal. (The browser narrows ONE 409 — its idempotency reservation envelope — to ambiguous, and a vault revision conflict is handled before this question is asked at all. Both are body-shaped distinctions, outside this corpus's status-only scope.)",
+      "status": 409,
+      "ambiguous": false
+    },
+    {
+      "name": "status-413",
+      "why": "The body was rejected on size before the handler ran.",
+      "status": 413,
+      "ambiguous": false
+    },
+    {
+      "name": "status-422",
+      "why": "Schema validation answered, then stopped.",
+      "status": 422,
+      "ambiguous": false
+    },
+    {
+      "name": "status-429",
+      "why": "The rate limiter answers ahead of the handler, so nothing was written. Retrying would only burn another token — this is why 429 is NOT lumped in with 5xx.",
+      "status": 429,
+      "ambiguous": false
+    },
+    {
+      "name": "status-500",
+      "why": "The handler may have committed and then failed on the way out.",
+      "status": 500,
+      "ambiguous": true
+    },
+    {
+      "name": "status-501",
+      "why": "5xx with no more specific rule: assume the server may have acted.",
+      "status": 501,
+      "ambiguous": true
+    },
+    {
+      "name": "status-502",
+      "why": "A gateway reporting an upstream it cannot speak for — the upstream may have run.",
+      "status": 502,
+      "ambiguous": true
+    },
+    {
+      "name": "status-503",
+      "why": "The peer that answered may not be the peer that would have written.",
+      "status": 503,
+      "ambiguous": true
+    },
+    {
+      "name": "status-504",
+      "why": "A gateway that gave up on an upstream still running. The write may yet land.",
+      "status": 504,
+      "ambiguous": true
+    },
+    {
+      "name": "status-599",
+      "why": "The top of the 5xx range holds the same way the bottom does.",
+      "status": 599,
+      "ambiguous": true
+    }
+  ]
+}

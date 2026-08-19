@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from costcompass import vault
+from costcompass import api, vault
 from costcompass.refresh import orchestrator, signers
 from costcompass.refresh import program as program_mod
 from costcompass.refresh.broker import BrokerError
@@ -294,6 +294,29 @@ def test_vault_entry_lookup_vector(vec: dict) -> None:
     found = v.entry_for(selector["provider"], selector.get("instance_key"))
     actual = found["api_key"] if found is not None else None
     assert actual == vec["expect_api_key"], vec["why"]
+
+
+# --- Ambiguous-failure classification ---------------------------------------
+# The STATUS half of "could this failed mutation still have committed
+# server-side?" — the question a relay asks before deciding whether a failed
+# vault write is worth reconciling against the server's document.
+#
+# Hand-authored on both sides: the browser's classifier carries arms this port
+# has no equivalent for, so generating ``ambiguous`` from it would dress one
+# port up as the reference for a rule all three own equally.
+#
+# The corpus's ``null`` status is "no status line at all" — here an ApiError
+# whose ``status`` is None, which is what ``_request`` maps an
+# ``httpx.RequestError`` to. Non-status arms (a ``VaultError``, which is raised
+# before anything is sent) stay in this port's own tests.
+
+_AMBIGUOUS = _load("ambiguous-failure.json")
+
+
+@pytest.mark.parametrize("vec", _AMBIGUOUS, ids=_ids(_AMBIGUOUS))
+def test_ambiguous_failure_vector(vec: dict) -> None:
+    exc = api.ApiError("boom", status=vec["status"])
+    assert api.is_ambiguous_failure(exc) is vec["ambiguous"], vec["why"]
 
 
 # --- Credential routing decision --------------------------------------------

@@ -146,10 +146,17 @@ def _rotation_persist_failed(
     sibling relay, in which case the grant is healthy and reporting it dead
     would cost the user a needless reauthorization.
 
-    Everything else is unproven: a transport error can arrive after the server
-    committed, and a vault we cannot re-read tells us nothing at all. Those
-    omit the reason and fall back to the generic "connection expired" wording,
-    which still asks for a reconnect without asserting that nothing can work.
+    The claim comes from the LOOK, never from the failure's shape. A transport
+    error can arrive after the server committed, so on its own it proves
+    nothing — but it is ambiguous rather than definite, which is precisely why
+    it is re-read, and a re-read that still shows the old token has earned the
+    claim as much as a conflict's would.
+
+    Everything else is unproven: a vault we cannot re-read tells us nothing at
+    all, and a definite pre-write rejection is deliberately not re-read (see
+    the give-up branch in ``_persist_rotated_sentinel_locked``). Those omit the
+    reason and fall back to the generic "connection expired" wording, which
+    still asks for a reconnect without asserting that nothing can work.
 
     Defaults to ``False`` so a raise site that says nothing under-claims. The
     failure mode of the safe default is a too-mild message; the failure mode of
@@ -594,6 +601,12 @@ class OAuthResolver:
         our locally-held copy: that would revert whatever the other writer
         just committed.
 
+        A lost race is not the only failure worth re-reading for. A transport
+        error or a 5xx is AMBIGUOUS — the server may have committed before the
+        response was lost — so it reconciles through the same path. Only a
+        failure the server answered before mutating (or that never left this
+        process) gives up at once.
+
         Returns which ``RotationPersistOutcome`` happened rather than None,
         because two of them are abandoned writes the CALLER has to act on. It
         deliberately does not raise for those — the abandon itself is correct,
@@ -663,7 +676,38 @@ class OAuthResolver:
                 vault_mod.write_back(self._api, candidate, self._password)
                 self._adopt(candidate)
                 return RotationPersistOutcome.PERSISTED
-            except api.VaultRevisionConflict as exc:
+            except (api.ApiError, vault_mod.VaultError) as exc:
+                if not isinstance(exc, api.VaultRevisionConflict) and not (
+                    isinstance(exc, api.ApiError) and api.is_ambiguous_failure(exc)
+                ):
+                    # A DEFINITE pre-write rejection: the server answered
+                    # before it mutated (400/413/429), or the request never
+                    # left this process (``VaultError`` is raised while
+                    # encrypting). Re-reading could only tell us what we
+                    # already know — the vault still holds the old token — so
+                    # we would spend a round trip on a run that is already
+                    # failing to learn nothing. Give up here.
+                    #
+                    # No ``confirmed_lost``, even though "the write definitely
+                    # did not land" is exactly the state that would earn it.
+                    # Under-claiming stays the rule: the generic wording still
+                    # asks for a reconnect, and every place we assert a grant
+                    # is DEAD is a place a wrong assert tells a user their
+                    # working connection is beyond saving.
+                    raise _rotation_persist_failed(provider, exc) from exc
+
+                # Anything else — a revision conflict, or an AMBIGUOUS failure
+                # whose response was lost after the server may already have
+                # committed — reconciles against the vault rather than giving
+                # up. The two share this whole block deliberately: they ask the
+                # same question ("what does the server actually hold now?"),
+                # the answer means the same thing, and a second copy of it
+                # would be the drift these comments exist to prevent.
+                #
+                # Retrying an ambiguous failure cannot clobber a write that DID
+                # land: every pass reloads first, so a committed rotation comes
+                # back as ``observed == rotated`` and returns PERSISTED below.
+                #
                 # The LAST attempt re-reads too, and that is the whole point:
                 # a rejected write says our copy lost the race, never that the
                 # rotated token is absent. Every earlier attempt already
@@ -730,8 +774,6 @@ class OAuthResolver:
                     raise _rotation_persist_failed(
                         provider, exc, confirmed_lost=True
                     ) from exc
-            except (api.ApiError, vault_mod.VaultError) as exc:
-                raise _rotation_persist_failed(provider, exc) from exc
         # Unreachable for any sane budget: the final attempt either returns or
         # raises. Only a caller passing attempts <= 0 falls through, and an
         # unsaved rotation must never look like a successful one.

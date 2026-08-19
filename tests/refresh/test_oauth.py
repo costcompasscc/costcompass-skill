@@ -663,21 +663,140 @@ def test_rotation_write_back_gives_up_as_reauth_after_the_budget():
     assert len(puts) == oauth.ROTATION_PERSIST_ATTEMPTS
 
 
-def test_rotation_write_back_does_not_retry_a_non_conflict_failure():
+@pytest.mark.parametrize("status", [400, 413, 429])
+def test_rotation_write_back_definite_rejection_never_re_reads(status):
+    # A definite pre-write refusal: the server answered before it mutated, so
+    # the vault still holds the old token by construction. A re-read could only
+    # confirm what we already know, and it would cost a round trip on a run
+    # that is already failing. One PUT, no reload.
+    calls = []
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.method)
+        if request.method == "PUT":
+            return httpx.Response(status, json={"error": "nope"})
+        return httpx.Response(200, json=_vault_blob("rt-old", 11))
+
+    resolver = _rotating_resolver(api_handler)
+    with pytest.raises(oauth.OAuthError, match="could not save it") as exc:
+        resolver._persist_rotated_sentinel(
+            "google", "__google_oauth__", "rt-old", "rt-new", **NO_JITTER
+        )
+    assert exc.value.status == 409
+    # NOT rotation_lost, even though "the write definitely did not land" is
+    # exactly the state that would earn it. Under-claiming is the deliberate
+    # rule — a wrong "your connection is dead" is the worse failure.
+    assert exc.value.reason is None
+    assert calls == ["PUT"]
+
+
+def test_rotation_write_back_ambiguous_failure_sees_our_token_saved():
+    # The headline case. A 500 can arrive AFTER the server committed, so the
+    # rotated token may be durable and the grant healthy. Giving up here badged
+    # a working connection reauth_required and sent the user to reconnect
+    # something that was never broken.
+    calls = []
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.method)
+        if request.method == "PUT":
+            return httpx.Response(500, json={"error": "boom"})
+        return httpx.Response(200, json=_vault_blob("rt-new", 12))
+
+    resolver = _rotating_resolver(api_handler)
+    outcome = resolver._persist_rotated_sentinel(
+        "google", "__google_oauth__", "rt-old", "rt-new", **NO_JITTER
+    )
+    assert outcome is oauth.RotationPersistOutcome.PERSISTED
+    # One PUT, one reload — the reload is the whole fix.
+    assert calls == ["PUT", "GET"]
+
+
+def test_rotation_write_back_ambiguous_failure_retries_and_can_still_save():
+    # Retrying cannot clobber a write that DID land: every pass reloads first,
+    # so a committed rotation returns PERSISTED above rather than being
+    # overwritten. Here nothing landed, and the retry is what saves the grant
+    # that giving up would have abandoned.
+    calls = []
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.method)
+        if request.method == "PUT":
+            if calls.count("PUT") == 1:
+                return httpx.Response(503, json={"error": "boom"})
+            return httpx.Response(200, json={"revision": 13, "updated_at": "z"})
+        return httpx.Response(200, json=_vault_blob("rt-old", 12))
+
+    resolver = _rotating_resolver(api_handler)
+    outcome = resolver._persist_rotated_sentinel(
+        "google", "__google_oauth__", "rt-old", "rt-new", **NO_JITTER
+    )
+    assert outcome is oauth.RotationPersistOutcome.PERSISTED
+    assert calls == ["PUT", "GET", "PUT"]
+
+
+def test_rotation_write_back_ambiguous_failure_that_never_lands_is_confirmed_lost():
+    # Every reload showed the OLD token, so the replacement really was never
+    # saved and the upstream killed the one we hold. The claim comes from the
+    # LOOK, not from the failure's shape — which is why an ambiguous failure
+    # earns it here exactly as a conflict does.
     puts = []
 
     def api_handler(request: httpx.Request) -> httpx.Response:
         if request.method == "PUT":
             puts.append(1)
             return httpx.Response(500, json={"error": "boom"})
-        return httpx.Response(200, json=_vault_blob("rt-old", 11))
+        return httpx.Response(200, json=_vault_blob("rt-old", 11 + len(puts)))
 
     resolver = _rotating_resolver(api_handler)
-    with pytest.raises(oauth.OAuthError, match="could not save it"):
+    with pytest.raises(oauth.OAuthError, match="could not save it") as exc:
         resolver._persist_rotated_sentinel(
             "google", "__google_oauth__", "rt-old", "rt-new", **NO_JITTER
         )
-    assert len(puts) == 1
+    assert exc.value.status == 409
+    assert exc.value.reason == oauth.ROTATION_LOST_REASON
+    assert len(puts) == oauth.ROTATION_PERSIST_ATTEMPTS
+
+
+def test_rotation_write_back_ambiguous_failure_over_a_fresher_grant_abandons():
+    # Neither ours nor its parent. The reconcile reaches the same verdict
+    # whatever rejected the write, which is the point of the two paths sharing
+    # one block.
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PUT":
+            return httpx.Response(502, json={"error": "boom"})
+        return httpx.Response(200, json=_vault_blob("rt-someone-elses", 12))
+
+    resolver = _rotating_resolver(api_handler)
+    outcome = resolver._persist_rotated_sentinel(
+        "google", "__google_oauth__", "rt-old", "rt-new", **NO_JITTER
+    )
+    assert outcome is oauth.RotationPersistOutcome.SUPERSEDED
+
+
+def test_rotation_write_back_local_encrypt_failure_is_definite(monkeypatch):
+    # A VaultError is raised while encrypting, before anything is sent. It can
+    # never have committed, so it must not be mistaken for an ambiguous
+    # transport failure and re-read. This is the arm where the browser's
+    # classifier would have disagreed with the two ports if it were used raw.
+    calls = []
+
+    def api_handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.method)
+        return httpx.Response(200, json=_vault_blob("rt-old", 11))
+
+    resolver = _rotating_resolver(api_handler)
+
+    def boom(*_args, **_kwargs):
+        raise vault.VaultError("encrypt failed")
+
+    monkeypatch.setattr(oauth.vault_mod, "write_back", boom)
+    with pytest.raises(oauth.OAuthError, match="could not save it") as exc:
+        resolver._persist_rotated_sentinel(
+            "google", "__google_oauth__", "rt-old", "rt-new", **NO_JITTER
+        )
+    assert exc.value.reason is None
+    assert calls == []
 
 
 def test_rotation_write_back_failure_leaves_no_unsaved_edit_behind():
