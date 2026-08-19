@@ -5,9 +5,19 @@ import pytest
 from costcompass import services
 
 PROVIDERS = [
-    {"id": "anthropic", "short_name": "Claude", "display_name": "Anthropic", "enabled": True},
+    {
+        "id": "anthropic",
+        "short_name": "Claude",
+        "display_name": "Anthropic",
+        "enabled": True,
+    },
     {"id": "openai", "short_name": "OpenAI", "display_name": "OpenAI", "enabled": True},
-    {"id": "google", "short_name": "Google", "display_name": "Google Cloud", "enabled": False},
+    {
+        "id": "google",
+        "short_name": "Google",
+        "display_name": "Google Cloud",
+        "enabled": False,
+    },
 ]
 
 
@@ -38,7 +48,12 @@ def test_unknown_lists_available():
 def test_prefers_enabled_instance():
     providers = [
         {"id": "google", "short_name": "Google", "enabled": False, "instance_key": ""},
-        {"id": "google", "short_name": "Google", "enabled": True, "instance_key": "proj-2"},
+        {
+            "id": "google",
+            "short_name": "Google",
+            "enabled": True,
+            "instance_key": "proj-2",
+        },
     ]
     assert services.resolve("google", providers)["instance_key"] == "proj-2"
 
@@ -56,7 +71,12 @@ def test_ambiguous_across_ids():
 # --- match() (used for the combined provider + subscription read path) ---
 
 SUBS = [
-    {"id": "uuid-higgs", "display_name": "Higgsfield", "kind": "subscription", "cost_usd": 14.5},
+    {
+        "id": "uuid-higgs",
+        "display_name": "Higgsfield",
+        "kind": "subscription",
+        "cost_usd": 14.5,
+    },
 ]
 
 

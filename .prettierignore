@@ -1,0 +1,8 @@
+# Golden test corpora: byte-stable, shared verbatim across all three relay
+# implementations (browser, this CLI, macOS) by the monorepo's
+# scripts/sync-relay-vectors.sh, which compares them byte-for-byte. Reformatting
+# either side fails that drift check, so these stay exactly as generated.
+tests/vectors/
+
+# Not prettier's language — ruff owns Python (see `make fmt-python`).
+*.py

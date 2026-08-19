@@ -69,9 +69,9 @@ _B64_CONTRACT = _load("body-b64-contract.json")
 
 @pytest.mark.parametrize("vec", _B64_CONTRACT, ids=_ids(_B64_CONTRACT))
 def test_body_b64_contract_vector(vec: dict) -> None:
-    assert program_mod.is_canonical_base64(vec["body_b64"]) is vec["canonical"], (
-        vec["why"]
-    )
+    assert program_mod.is_canonical_base64(vec["body_b64"]) is vec["canonical"], vec[
+        "why"
+    ]
 
 
 # --- Vault JWE decrypt ------------------------------------------------------

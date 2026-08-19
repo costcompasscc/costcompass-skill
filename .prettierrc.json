@@ -1,0 +1,9 @@
+{
+  "printWidth": 88,
+  "overrides": [
+    {
+      "files": "*.md",
+      "options": { "proseWrap": "preserve" }
+    }
+  ]
+}

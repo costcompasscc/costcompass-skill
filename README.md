@@ -11,12 +11,12 @@ answer from your own [CostCompass](https://costcompass.cc) account.
 Then just ask — "what's my spend this month?", "how much on claude?", "which
 provider costs the most?" — or use the commands directly:
 
-| | |
-|---|---|
-| `/costcompass:spend` | Ask about spend in your own words |
-| `/costcompass:mtd [service]` | Month-to-date total, or one service |
-| `/costcompass:refresh [service]` | Pull fresh usage from providers, then report |
-| `/costcompass:auth-status` | Check you're authenticated and the vault is readable |
+|                                  |                                                      |
+| -------------------------------- | ---------------------------------------------------- |
+| `/costcompass:spend`             | Ask about spend in your own words                    |
+| `/costcompass:mtd [service]`     | Month-to-date total, or one service                  |
+| `/costcompass:refresh [service]` | Pull fresh usage from providers, then report         |
+| `/costcompass:auth-status`       | Check you're authenticated and the vault is readable |
 
 ## Setup
 
@@ -121,11 +121,11 @@ later.
 Resolution is **most-hardened first**. `auth status` always reports which source
 won, so "which one am I actually using?" is never a guess.
 
-| Value          | 1st                   | 2nd                            | 3rd                              |
-|----------------|-----------------------|--------------------------------|----------------------------------|
-| API key        | OS credential store   | `COSTCOMPASS_API_KEY`          | — (never the config file)        |
-| Vault password | OS credential store   | `COSTCOMPASS_VAULT_PASSWORD`   | `vault_password` in the config file |
-| Base URL       | `COSTCOMPASS_API_URL` | `api_url` in the config file   | `https://costcompass.cc/api/v1`  |
+| Value          | 1st                   | 2nd                          | 3rd                                 |
+| -------------- | --------------------- | ---------------------------- | ----------------------------------- |
+| API key        | OS credential store   | `COSTCOMPASS_API_KEY`        | — (never the config file)           |
+| Vault password | OS credential store   | `COSTCOMPASS_VAULT_PASSWORD` | `vault_password` in the config file |
+| Base URL       | `COSTCOMPASS_API_URL` | `api_url` in the config file | `https://costcompass.cc/api/v1`     |
 
 The **OS credential store** is your platform's own: Keychain on macOS,
 Credential Manager on Windows, Secret Service on Linux (KWallet and other
@@ -163,7 +163,7 @@ Service names resolve dynamically against the server (`claude` →
 A name that isn't a metered provider falls back to a standalone
 **subscription** card (e.g. a Higgsfield plan); since a subscription is a
 flat fee it shows just its amount, with no burn/forecast/per-model detail.
-`mtd breakdown` is the unified view — it lists providers *and* subscriptions
+`mtd breakdown` is the unified view — it lists providers _and_ subscriptions
 and its total matches `mtd`.
 
 ### JSON output
@@ -224,9 +224,9 @@ unset COSTCOMPASS_VAULT_PASSWORD         # drop it when done
 printf '%s' "$pw" | costcompass mtd refresh --vault --json
 ```
 
-Your vault password decrypts *every* provider credential, so it deserves the
+Your vault password decrypts _every_ provider credential, so it deserves the
 most protection of anything here. Prefer the credential store; if you use the
-environment, export it in the shell *before* launching the tool that needs it
+environment, export it in the shell _before_ launching the tool that needs it
 (e.g. Claude Code) so it stays in process memory. **Never** put it in `.zshrc`
 or `.env` — that is plaintext plus shell history, and committed configs leak it
 to git.

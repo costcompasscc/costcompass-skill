@@ -26,14 +26,20 @@ def build_auth_header_value(scheme: str | None, api_key: str) -> str:
     return f"{scheme} {api_key}" if scheme else api_key
 
 
-def build_plan_headers(plan: dict[str, Any], api_key: str, now_sec: int | None = None) -> dict[str, str]:
+def build_plan_headers(
+    plan: dict[str, Any], api_key: str, now_sec: int | None = None
+) -> dict[str, str]:
     signed = plan.get("signed_auth")
     if signed:
         return _sign_signed_auth(signed, api_key, now_sec)
-    return {plan["auth_header"]: build_auth_header_value(plan.get("auth_scheme"), api_key)}
+    return {
+        plan["auth_header"]: build_auth_header_value(plan.get("auth_scheme"), api_key)
+    }
 
 
-def _sign_signed_auth(spec: dict[str, Any], api_key: str, now_sec: int | None) -> dict[str, str]:
+def _sign_signed_auth(
+    spec: dict[str, Any], api_key: str, now_sec: int | None
+) -> dict[str, str]:
     kind = spec.get("kind")
     if kind == "qc_hmac_v1":
         return sign_quantconnect_hmac_v1(spec, api_key, now_sec)

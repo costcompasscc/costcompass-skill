@@ -20,6 +20,12 @@ dev = [
     "pytest>=8",
     "pytest-cov>=5",
     "jwcrypto>=1.5",  # cross-impl JWE vector check only (not a runtime dep)
+    # Pinned exactly, not floated: `ruff format` output changes between releases,
+    # so a floating range makes `make fmt-check` report drift that exists only on
+    # whichever machine resolved a newer ruff. This pin tracks the monorepo's
+    # backend/requirements-dev.txt — the two trees are formatted by one version so
+    # code moving between them never churns.
+    "ruff==0.16.1",
 ]
 
 [build-system]

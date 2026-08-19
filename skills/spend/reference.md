@@ -83,12 +83,12 @@ no `CLAUDE_PLUGIN_ROOT`), and append `--url <base>` to the `auth login` line if
   prompt needs a real terminal window. This applies to every secret-storing
   command (`auth login`, `auth vault`).
 - Show or quote the `auth status --json` output. `source: null`,
-  `valid: false`, and `ready.spend` are diagnostics for *you* — to the user they
+  `valid: false`, and `ready.spend` are diagnostics for _you_ — to the user they
   are noise that buries the two things they can actually do.
 - Lead with what's broken, a status table, or a field-by-field readout.
 - Explain the resolution order, or why the credential store beats the
   environment. They didn't ask.
-- Volunteer the vault password — it is a *separate* secret and irrelevant to a
+- Volunteer the vault password — it is a _separate_ secret and irrelevant to a
   spend question. Only raise it if they asked to refresh.
 
 Never ask the user to paste the key into the chat, and never echo one back.

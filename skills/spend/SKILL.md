@@ -42,10 +42,13 @@ stderr — expected, needs network, a few seconds.
 **Read `ready` out of the first JSON — don't re-derive it from the parts:**
 
 ```json
-{"server": "…", "identity": "user@example.com",
- "api_key": {"source": "credential-store|env|null", "valid": true},
- "vault":   {"source": "credential-store|env|config-file|null", "unlocks": true},
- "ready":   {"spend": true, "refresh": true}}
+{
+  "server": "…",
+  "identity": "user@example.com",
+  "api_key": { "source": "credential-store|env|null", "valid": true },
+  "vault": { "source": "credential-store|env|config-file|null", "unlocks": true },
+  "ready": { "spend": true, "refresh": true }
+}
 ```
 
 - **`ready.spend` true** → summarize the `mtd` JSON (see Presentation).

@@ -1,0 +1,8 @@
+{
+  "name": "costcompass-skill-repo",
+  "private": true,
+  "description": "Repo tooling only (formatting). The shipped artifact is the Python CLI in src/ — nothing here is installed by the plugin.",
+  "devDependencies": {
+    "prettier": "^3.4.2"
+  }
+}

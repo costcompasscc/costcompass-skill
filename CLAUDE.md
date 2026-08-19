@@ -8,7 +8,7 @@ This repo is **both** things at once, and that is the point:
 
 They share one root because a plugin is installed by copying its root into a
 versioned cache — so the plugin cannot reach a CLI living anywhere else and
-must carry its own copy. Making the plugin root *be* the CLI root means there
+must carry its own copy. Making the plugin root _be_ the CLI root means there
 is exactly one copy instead of a vendored duplicate to keep in sync.
 
 This repo is public. The CostCompass monorepo is private and is assumed to be
@@ -74,7 +74,7 @@ not your uncommitted edits.
 ## Releasing
 
 This repo is its own marketplace, so **pushing to `main` publishes**. What
-decides whether an *already-installed* plugin updates is
+decides whether an _already-installed_ plugin updates is
 `.claude-plugin/plugin.json`'s version — it names the install cache directory.
 Merge code without moving that number and existing users keep running what they
 already have, silently.
@@ -108,11 +108,11 @@ only fixes is a patch bump.
   greps both.
 - **No plugin-id branching, and no provider tables.** Like
   `../costcompass/frontend/src/lib/`, this code branches on plan/credential
-  *shape* (flat vs `program`, direct vault entry vs minted), never on a
+  _shape_ (flat vs `program`, direct vault entry vs minted), never on a
   provider id literal. **Credential routing is server-authored**: each
   fetch-run entry carries a `credential` object
   (`{kind: "vault_key" | "oauth_mint" | "oauth_installation_grant",
-  sentinel_key?, mint_path?, grant_path?}`) the App Server builds from the
+sentinel_key?, mint_path?, grant_path?}`) the App Server builds from the
   plugin's `credential_routing()`. The CLI executes every kind above (direct
   vault entry first, then `oauth_mint`, then the two-leg
   `oauth_installation_grant`) and skips any kind it does not know with an
@@ -131,12 +131,13 @@ only fixes is a patch bump.
   idea GitHub is on the other end. A kind that seems to need a provider branch
   here is the signal to go looking for its routing-data form, not to add the
   branch.
+
 - **Security.** Never log the vault password, decrypted keys, minted tokens,
   or the API key. The decrypted vault stays in process memory only — never
   written to disk. Neither secret is ever accepted as an argv value.
 - **Never store an unverified secret.** `auth login` proves the key against
   the server and `auth vault` proves the password actually decrypts the vault,
-  each *before* writing anything. This is not politeness: the earlier
+  each _before_ writing anything. This is not politeness: the earlier
   `auth login` prompted, wrote, and printed "Saved credentials" without
   checking, so a vault password typed at the API-key prompt was persisted in
   plaintext, silently destroyed the real key (`O_TRUNC`), and reported
@@ -147,11 +148,11 @@ only fixes is a patch bump.
 Resolution is **most-hardened first**, and every resolver returns the source
 alongside the value so `auth status` can report which one won:
 
-| Value | 1st | 2nd | 3rd |
-|---|---|---|---|
-| API key | credential store | `COSTCOMPASS_API_KEY` | — never the file |
-| Vault password | credential store | `COSTCOMPASS_VAULT_PASSWORD` | `vault_password` in the file |
-| Base URL | `COSTCOMPASS_API_URL` | `api_url` in the file | built-in default |
+| Value          | 1st                   | 2nd                          | 3rd                          |
+| -------------- | --------------------- | ---------------------------- | ---------------------------- |
+| API key        | credential store      | `COSTCOMPASS_API_KEY`        | — never the file             |
+| Vault password | credential store      | `COSTCOMPASS_VAULT_PASSWORD` | `vault_password` in the file |
+| Base URL       | `COSTCOMPASS_API_URL` | `api_url` in the file        | built-in default             |
 
 Consequence to keep in mind: because the store wins, an exported
 `COSTCOMPASS_API_KEY` does **not** override a stored key. That is intended;
@@ -160,7 +161,7 @@ Consequence to keep in mind: because the store wins, an exported
 `secrets.py` mirrors the macOS app's `SecretsStore` protocol but uses its own
 service (`cc.costcompass.cli`, not `cc.costcompass.menubar`) so the two
 clients never disturb each other's credentials. No usable backend is a
-*fallback*, not an error — `store()` returns a `NullStore` and resolution
+_fallback_, not an error — `store()` returns a `NullStore` and resolution
 continues to env/file. Linux's many backends plug in through `keyring`'s entry
 points; don't hand-roll per-OS code here.
 
@@ -203,6 +204,22 @@ implementation) so the JWE format stays portable. The monorepo's
 `./run-tests.sh` calls this script through its `client/plugin` symlink as its
 **client** phase (`--client-only` / `--no-client`), skipping it when this repo isn't
 checked out — so there is one list of test commands, not two.
+
+## Formatting
+
+Run `make` with no arguments for the list of targets; the list is generated from
+the `Makefile` itself, so it cannot drift. `make fmt-check` is the gate to run
+before a commit, `make fmt` rewrites in place.
+
+Two formatters, split by language: ruff owns Python, prettier owns Markdown and
+JSON. Both are pinned — ruff exactly in `pyproject.toml`'s dev group (tracking
+the monorepo's `backend/requirements-dev.txt`), prettier in `package-lock.json`
+— because both tools change their output between releases, and an unpinned one
+makes the gate answer differently per machine.
+
+This tree formats itself. The monorepo's `.prettierignore` excludes
+`client/plugin/` (this repo, symlinked) precisely so that it does not, which is
+why these targets exist here rather than there.
 
 ## The `bin/costcompass` wrapper
 

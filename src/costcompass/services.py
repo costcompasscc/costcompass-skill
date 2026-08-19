@@ -74,7 +74,11 @@ def available_names(
     standalone subscription cards — for an 'unknown service' error."""
     parts = [_available(providers)]
     subs = sorted(
-        {(s.get("display_name") or "").strip() for s in subscriptions if (s.get("display_name") or "").strip()}
+        {
+            (s.get("display_name") or "").strip()
+            for s in subscriptions
+            if (s.get("display_name") or "").strip()
+        }
     )
     if subs:
         parts.append("subscriptions: " + ", ".join(subs))

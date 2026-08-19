@@ -21,3 +21,7 @@ build/
 # but guard against an accidental in-tree copy holding an API key.
 config.toml
 .env
+
+# Formatter tooling (prettier). package.json/package-lock.json ARE committed —
+# only the installed tree is not.
+node_modules/
