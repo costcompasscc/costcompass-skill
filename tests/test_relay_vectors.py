@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -375,3 +376,48 @@ def test_credential_routing_vector(vec: dict) -> None:
         got = {"kind": "missing"}
 
     assert got == vec["expect"]
+
+
+# --- Entry purpose resolution -----------------------------------------------
+# Hand-written corpus, like vault-entry-lookup and for the same reason: the
+# rule it pins is a DECISION, and the browser could not be its oracle. The
+# browser hand-wrote this derivation at each of its four submit sites and three
+# of them never consulted ``program.purpose`` at all, so generating the
+# expectations from the reference would have written the defect down as the
+# contract.
+#
+# `make lockstep` cannot catch that class either — a missing branch is an
+# ABSENCE, not a drifted line — and each relay's own suite only ever proves
+# that relay self-consistent. Only a shared corpus proves the three AGREE.
+#
+# The vector drives ``_entry_purpose(plan) or fallback``, the exact expression
+# every call site in this module uses, because the fallback-resolved value is
+# the one that reaches the wire.
+
+_ENTRY_PURPOSE = _load("entry-purpose.json")
+
+
+@pytest.mark.parametrize("vec", _ENTRY_PURPOSE, ids=_ids(_ENTRY_PURPOSE))
+def test_entry_purpose_vector(vec: dict) -> None:
+    got = orchestrator._entry_purpose(vec["plan"]) or vec["fallback"]
+    _probe_entry_purpose(vec["name"], got)
+    assert got == vec["expect"]["purpose"]
+
+
+def _probe_entry_purpose(name: str, purpose: str) -> None:
+    """Append this relay's resolved value to ``PURPOSE_PROBE_OUT`` when that
+    variable names a path; do nothing when it does not, which is every normal
+    run.
+
+    It is how a cross-relay comparison is built from each relay's own resolver
+    rather than from parsed test output. The browser and macOS vector suites
+    honour the same variable with the same JSON schema. Appends per vector
+    because pytest parametrization gives each vector its own test.
+    """
+    out = os.environ.get("PURPOSE_PROBE_OUT")
+    if not out:
+        return
+    path = Path(out)
+    rows = json.loads(path.read_text()) if path.exists() else []
+    rows.append({"name": name, "purpose": purpose})
+    path.write_text(json.dumps(rows, indent=2) + "\n")

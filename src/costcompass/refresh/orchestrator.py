@@ -563,8 +563,17 @@ def _synthetic_deadline(req: dict[str, Any]) -> dict[str, Any]:
 
 def _entry_purpose(plan: dict[str, Any]) -> str:
     """Generic relay purpose for a synthetic/error response: the program's
-    purpose, else the first request's, mirroring the browser. The purpose is
-    a required wire field, so callers use a hard fallback when this is ``""``.
+    purpose, else the first request's — with an empty string absent at both
+    levels, since a blank ``request_purpose`` is not a value. The field is
+    required on the wire, so every call site spells ``_entry_purpose(plan) or
+    "<hard fallback>"``; that resolved value is what the App Server sees.
+
+    LOCKSTEP: siblings are ``entryPurposeOr`` (browser orchestrator.ts) and
+    ``entryPurpose(_:fallback:)`` (macOS RefreshOrchestrator.swift). The three
+    agree by ``test-vectors/relay/entry-purpose.json``, not by inspection. That
+    corpus is hand-authored rather than generated from the browser, because the
+    browser is the side it was written to correct — this implementation and the
+    macOS one already held the contract.
     """
     program = plan.get("program") or {}
     if program.get("purpose"):
