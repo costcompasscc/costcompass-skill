@@ -16,6 +16,12 @@ from . import user_agent
 #: Gap before the single finalize replay, in seconds.
 FINALIZE_RETRY_DELAY_S = 1.0
 
+#: The header the App Server stamps on every reply it emits; no hop in front
+#: of it adds it. Presence is the whole signal — see
+#: backend/app/core/server_identity.py and client/macos/CLAUDE.md ("Every
+#: /api/v1 reply must prove it came from the App Server").
+SERVER_IDENTITY_HEADER = "X-CC-Server"
+
 
 class ApiError(Exception):
     """User-facing API failure (auth, connectivity, or a 4xx/5xx body).
@@ -123,6 +129,10 @@ class Client:
             )
         except httpx.RequestError as exc:
             raise ApiError(f"Could not reach {self.base_url}: {exc}") from exc
+        if SERVER_IDENTITY_HEADER not in resp.headers:
+            raise ApiError(
+                f"Could not reach {self.base_url}: response was not from the App Server"
+            )
         if none_on_404 and resp.status_code == 404:
             return None
         if resp.status_code in (401, 403):

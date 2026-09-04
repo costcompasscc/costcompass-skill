@@ -135,6 +135,12 @@ sentinel_key?, mint_path?, grant_path?}`) the App Server builds from the
 - **Security.** Never log the vault password, decrypted keys, minted tokens,
   or the API key. The decrypted vault stays in process memory only — never
   written to disk. Neither secret is ever accepted as an argv value.
+- **Every App Server reply must prove it's from the App Server.** A request
+  crosses Cloudflare, a tunnel, and nginx, any of which can answer instead of
+  the origin with any status. `Client._request` refuses a reply missing
+  `X-CC-Server` before reading its status — see
+  `../costcompass/client/macos/CLAUDE.md` for the full rationale (this is the
+  CLI port of `APIClient.execute`).
 - **Never store an unverified secret.** `auth login` proves the key against
   the server and `auth vault` proves the password actually decrypts the vault,
   each _before_ writing anything. This is not politeness: the earlier

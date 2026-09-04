@@ -55,6 +55,18 @@ def test_401_maps_to_friendly_error(make_api):
     assert "Invalid or expired API key" in str(exc.value)
 
 
+def test_unstamped_response_maps_to_clean_error(make_api):
+    # A hop in front of the App Server (proxy, CDN, dead upstream) can answer
+    # with any status; only the App Server stamps X-CC-Server. An unstamped
+    # 401 is that hop's opinion, not ours, and must not be read as a bad key.
+    client = make_api(
+        lambda r: httpx.Response(401, json={"error": "denied"}), stamp=False
+    )
+    with pytest.raises(api.ApiError) as exc:
+        client.me()
+    assert "Could not reach" in str(exc.value)
+
+
 def test_connection_error_maps(make_api):
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("boom", request=request)
