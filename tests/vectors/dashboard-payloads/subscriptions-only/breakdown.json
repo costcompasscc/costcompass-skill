@@ -1,0 +1,11 @@
+[
+  {
+    "breakdown_label": "Breakdown",
+    "cost_usd": 12.0,
+    "display_name": "Design tool",
+    "instance_key": "",
+    "kind": "subscription",
+    "model_breakdown": [],
+    "provider_id": "sub-golden-standalone-0001"
+  }
+]

@@ -1,0 +1,29 @@
+{
+  "burn_rate_7day": 0.3214,
+  "days_remaining": 15,
+  "enabled_provider_count": 3,
+  "forecast_usd": 9.9643,
+  "incomplete_card_count": 0,
+  "mtd_usd": 8.75,
+  "newest_fetched_at": "2026-04-15T11:00:00Z",
+  "per_provider_burn": {
+    "mock": 0.3214
+  },
+  "previous_month_usd": 0.0,
+  "stale_cards": [
+    {
+      "blocked": false,
+      "days": null,
+      "display_name": "Anthropic (Claude)",
+      "instance_key": "",
+      "provider_id": "anthropic"
+    },
+    {
+      "blocked": false,
+      "days": 40,
+      "display_name": "OpenAI",
+      "instance_key": "",
+      "provider_id": "openai"
+    }
+  ]
+}

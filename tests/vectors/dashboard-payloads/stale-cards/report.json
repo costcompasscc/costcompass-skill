@@ -1,0 +1,95 @@
+{
+  "balance_caveat": null,
+  "balance_stale_count": 0,
+  "balance_total_usd": null,
+  "balance_unavailable_count": 0,
+  "generated_at_utc": "2026-04-15T12:00:00Z",
+  "no_activity": [
+    {
+      "balance_status": null,
+      "display_name": "Anthropic (Claude)"
+    }
+  ],
+  "services": [
+    {
+      "attention": {
+        "kind": "stale",
+        "message": "Updated 40 days ago"
+      },
+      "balance_display": null,
+      "balance_status": null,
+      "breakdown_label": "Breakdown",
+      "color_index": 0,
+      "cost_usd": 6.5,
+      "display_name": "OpenAI",
+      "fraction": 0.7428571428571429,
+      "free_lines": [],
+      "key": "provider:openai:",
+      "model_breakdown": [
+        {
+          "cost_usd": 6.5,
+          "display_name": "GPT-4o",
+          "display_value": null,
+          "group": null,
+          "model": "gpt-4o",
+          "surface": null,
+          "value_tooltip": null
+        }
+      ],
+      "percent_label": "74%"
+    },
+    {
+      "attention": null,
+      "balance_display": null,
+      "balance_status": null,
+      "breakdown_label": "Breakdown",
+      "color_index": 1,
+      "cost_usd": 2.25,
+      "display_name": "Mock Provider",
+      "fraction": 0.2571428571428571,
+      "free_lines": [],
+      "key": "provider:mock:",
+      "model_breakdown": [
+        {
+          "cost_usd": 2.25,
+          "display_name": "mock-large",
+          "display_value": null,
+          "group": null,
+          "model": "mock-large",
+          "surface": null,
+          "value_tooltip": null
+        }
+      ],
+      "percent_label": "26%"
+    }
+  ],
+  "slices": [
+    {
+      "balance_display": null,
+      "balance_status": null,
+      "color_index": 0,
+      "cost_usd": 6.5,
+      "display_name": "OpenAI",
+      "fraction": 0.7428571428571429,
+      "key": "provider:openai:",
+      "member_count": 1,
+      "percent_label": "74%",
+      "start_fraction": 0.0
+    },
+    {
+      "balance_display": null,
+      "balance_status": null,
+      "color_index": 1,
+      "cost_usd": 2.25,
+      "display_name": "Mock Provider",
+      "fraction": 0.2571428571428571,
+      "key": "provider:mock:",
+      "member_count": 1,
+      "percent_label": "26%",
+      "start_fraction": 0.7428571428571429
+    }
+  ],
+  "total_usd": 8.75,
+  "window_end": "2026-05-01",
+  "window_start": "2026-04-01"
+}

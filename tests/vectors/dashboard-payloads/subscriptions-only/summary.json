@@ -1,0 +1,12 @@
+{
+  "burn_rate_7day": 0.8,
+  "days_remaining": 15,
+  "enabled_provider_count": 0,
+  "forecast_usd": 24.0,
+  "incomplete_card_count": 0,
+  "mtd_usd": 12.0,
+  "newest_fetched_at": null,
+  "per_provider_burn": {},
+  "previous_month_usd": 24.0,
+  "stale_cards": []
+}

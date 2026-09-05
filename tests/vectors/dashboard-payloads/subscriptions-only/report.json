@@ -1,0 +1,41 @@
+{
+  "balance_caveat": null,
+  "balance_stale_count": 0,
+  "balance_total_usd": null,
+  "balance_unavailable_count": 0,
+  "generated_at_utc": "2026-04-15T12:00:00Z",
+  "no_activity": [],
+  "services": [
+    {
+      "attention": null,
+      "balance_display": null,
+      "balance_status": null,
+      "breakdown_label": "Breakdown",
+      "color_index": 0,
+      "cost_usd": 12.0,
+      "display_name": "Design tool",
+      "fraction": 1.0,
+      "free_lines": [],
+      "key": "subscription:sub-golden-standalone-0001",
+      "model_breakdown": [],
+      "percent_label": "100%"
+    }
+  ],
+  "slices": [
+    {
+      "balance_display": null,
+      "balance_status": null,
+      "color_index": 0,
+      "cost_usd": 12.0,
+      "display_name": "Design tool",
+      "fraction": 1.0,
+      "key": "subscription:sub-golden-standalone-0001",
+      "member_count": 1,
+      "percent_label": "100%",
+      "start_fraction": 0.0
+    }
+  ],
+  "total_usd": 12.0,
+  "window_end": "2026-05-01",
+  "window_start": "2026-04-01"
+}

@@ -1,0 +1,58 @@
+[
+  {
+    "breakdown_label": "Breakdown",
+    "cost_usd": 48.25,
+    "display_name": "Anthropic (Claude)",
+    "instance_key": "",
+    "kind": "provider",
+    "model_breakdown": [
+      {
+        "cost_usd": 41.0,
+        "display_name": "Claude Opus 4",
+        "display_value": null,
+        "group": null,
+        "model": "claude-opus-4",
+        "surface": "ai_usage",
+        "value_tooltip": null
+      },
+      {
+        "cost_usd": 7.25,
+        "display_name": "Claude Sonnet 4",
+        "display_value": null,
+        "group": null,
+        "model": "claude-sonnet-4",
+        "surface": "ai_usage",
+        "value_tooltip": null
+      }
+    ],
+    "provider_id": "anthropic"
+  },
+  {
+    "breakdown_label": "Breakdown",
+    "cost_usd": 13.454,
+    "display_name": "OpenAI",
+    "instance_key": "",
+    "kind": "provider",
+    "model_breakdown": [
+      {
+        "cost_usd": 13.45,
+        "display_name": "GPT-4o",
+        "display_value": null,
+        "group": null,
+        "model": "gpt-4o",
+        "surface": null,
+        "value_tooltip": null
+      },
+      {
+        "cost_usd": 0.004,
+        "display_name": "GPT-4o mini",
+        "display_value": null,
+        "group": null,
+        "model": "gpt-4o-mini",
+        "surface": null,
+        "value_tooltip": null
+      }
+    ],
+    "provider_id": "openai"
+  }
+]

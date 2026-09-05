@@ -1,0 +1,2 @@
+menubar/mtd	$0
+menubar/mtd-and-balance	$0

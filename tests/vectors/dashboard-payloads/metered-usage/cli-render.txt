@@ -1,0 +1,5 @@
+mtd/00	$61.70
+breakdown/00	  $48.25  Anthropic (Claude)
+breakdown/01	  $13.45  OpenAI
+breakdown/02	  ------
+breakdown/03	  $61.70  Total

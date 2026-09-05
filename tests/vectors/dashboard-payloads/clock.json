@@ -1,0 +1,4 @@
+{
+  "_comment": "The one frozen instant every scenario in this corpus is captured at. Mid-month so days_remaining, the trailing-7-day burn window and the previous-month window are all non-degenerate. Matches the _today() anchor already used by backend/tests/integration/test_query_service.py. Both the server clock (query_service._utc, report_service._utc) and the browser clock (vi.setSystemTime, page.clock.install) are pinned here — see README.md.",
+  "now_utc": "2026-04-15T12:00:00Z"
+}

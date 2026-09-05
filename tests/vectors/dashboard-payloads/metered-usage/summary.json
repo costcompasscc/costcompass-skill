@@ -1,0 +1,15 @@
+{
+  "burn_rate_7day": 4.8863,
+  "days_remaining": 15,
+  "enabled_provider_count": 2,
+  "forecast_usd": 151.4749,
+  "incomplete_card_count": 0,
+  "mtd_usd": 61.704,
+  "newest_fetched_at": "2026-04-15T11:45:00Z",
+  "per_provider_burn": {
+    "anthropic": 4.2643,
+    "openai": 0.622
+  },
+  "previous_month_usd": 43.5,
+  "stale_cards": []
+}

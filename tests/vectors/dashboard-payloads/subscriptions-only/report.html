@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>April 2026 Month-to-Date Report</title>
+    <style>
+      /* Paper is white, so this pins the light palette unconditionally —
+         there is no viewer theme to follow. Values match the app's light
+         tokens in frontend/src/index.css. */
+      @page {
+        size: A4;
+        margin: 16mm 14mm 14mm;
+        @bottom-right {
+          content: counter(page) " / " counter(pages);
+          font-family: sans-serif;
+          font-size: 8pt;
+          color: #9a9a9a;
+        }
+      }
+
+      :root {
+        --ink: #111111;
+        --ink-soft: #3a3a3a;
+        --ink-muted: #6b6b6b;
+        --ink-faint: #9a9a9a;
+        --rule: #e8e2d6;
+        --copper: #b5651d;
+      }
+
+      body {
+        font-family: sans-serif;
+        font-size: 9pt;
+        line-height: 1.5;
+        color: var(--ink);
+        margin: 0;
+      }
+
+      .label {
+        font-size: 7pt;
+        font-weight: 600;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: #6f6f6f;
+      }
+
+      /* ── masthead ─────────────────────────────────────────── */
+      .masthead-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 1.5pt solid var(--ink);
+        padding-bottom: 5pt;
+      }
+      .wordmark {
+        font-family: serif;
+        font-size: 13pt;
+        display: flex;
+        align-items: center;
+        gap: 5pt;
+      }
+      /* Sized off the wordmark rather than fixed, so the lockup keeps the
+         proportion the page uses (mark ≈ 1.3× the type). */
+      .wordmark svg {
+        width: 16pt;
+        height: 16pt;
+      }
+      h1 {
+        font-family: serif;
+        font-size: 20pt;
+        font-weight: 500;
+        margin: 10pt 0 0;
+      }
+      .sub {
+        color: var(--ink-muted);
+        margin: 4pt 0 0;
+        font-size: 8.5pt;
+      }
+
+      /* ── ring + legend ────────────────────────────────────── */
+      .ring-block {
+        display: flex;
+        gap: 16pt;
+        align-items: center;
+        margin-top: 16pt;
+        border: 0.75pt solid var(--rule);
+        padding: 12pt;
+      }
+      .ring-holder {
+        position: relative;
+        width: 165pt;
+        height: 165pt;
+        flex: 0 0 auto;
+      }
+      .ring-holder svg {
+        width: 165pt;
+        height: 165pt;
+      }
+      .ring-center {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 165pt;
+        height: 165pt;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+      }
+      .ring-total {
+        font-family: serif;
+        font-size: 19pt;
+        line-height: 1.1;
+      }
+      .ring-left {
+        font-size: 8pt;
+        color: var(--ink-muted);
+      }
+      /* Holds the legend and, under it, the caveat. The caveat is
+         deliberately NOT inside .ring-center: that box is the ring's inner
+         hole, roughly 60pt across, and a sentence put there overprints the
+         arcs. */
+      .legend-col {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      /* The balance caveat. Sits under the legend when there is a ring and
+         stands alone when there is not — a card whose probe failed and which
+         spent nothing draws no arc, and that is exactly the case worth
+         saying. */
+      .balance-note {
+        font-size: 7.5pt;
+        color: var(--ink-muted);
+        margin-top: 6pt;
+      }
+      .balance-note-standalone {
+        margin-top: 10pt;
+      }
+      .status-detail {
+        font-size: 7pt;
+        color: var(--ink-muted);
+      }
+
+      .legend {
+        flex: 1 1 auto;
+        border-collapse: collapse;
+        width: 100%;
+      }
+      .legend td {
+        border-bottom: 0.5pt solid var(--rule);
+        padding: 3.5pt 0;
+        vertical-align: top;
+      }
+      .legend tr:last-child td {
+        border-bottom: 0;
+      }
+      .swatch-cell {
+        width: 12pt;
+      }
+      .swatch {
+        display: inline-block;
+        width: 7pt;
+        height: 7pt;
+        border-radius: 1pt;
+      }
+      .leg-sub {
+        font-size: 7.5pt;
+        color: var(--ink-muted);
+      }
+      .num {
+        text-align: right;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ── service sections ─────────────────────────────────── */
+      .sections-label {
+        margin-top: 16pt;
+      }
+      .svc {
+        /* A section split across a page break separates a service's total
+           from the rows that explain it. */
+        break-inside: avoid;
+        border: 0.75pt solid var(--rule);
+        padding: 9pt 11pt;
+        margin-top: 8pt;
+      }
+      .svc-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        border-bottom: 0.5pt solid var(--rule);
+        padding-bottom: 5pt;
+        margin-bottom: 6pt;
+      }
+      .svc-name {
+        font-family: serif;
+        font-size: 11.5pt;
+      }
+      .svc-figures {
+        text-align: right;
+      }
+      .svc-total {
+        font-size: 11pt;
+        font-variant-numeric: tabular-nums;
+      }
+      .svc-meta {
+        font-size: 7.5pt;
+        color: var(--ink-muted);
+        white-space: nowrap;
+      }
+      .pill {
+        font-size: 6.5pt;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        font-weight: 600;
+        color: var(--ink-muted);
+        border: 0.5pt solid var(--rule);
+        border-radius: 6pt;
+        padding: 0.5pt 4pt;
+        margin-left: 5pt;
+        white-space: nowrap;
+      }
+      .group-label {
+        margin: 7pt 0 2pt;
+      }
+      .group-label:first-of-type {
+        margin-top: 0;
+      }
+      .rows {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .rows td {
+        padding: 2pt 0;
+        border-bottom: 0.4pt dotted var(--rule);
+        font-size: 8.5pt;
+      }
+      .rows tr:last-child td {
+        border-bottom: 0;
+      }
+      .rows .num {
+        color: var(--ink-soft);
+      }
+      .dim {
+        color: var(--ink-muted);
+      }
+
+      /* ── colophon ─────────────────────────────────────────── */
+      .zero {
+        margin-top: 14pt;
+        border-top: 0.75pt solid var(--rule);
+        padding-top: 8pt;
+      }
+      .zero-list {
+        font-size: 8.5pt;
+        color: var(--ink-muted);
+        margin-top: 3pt;
+      }
+      .colophon {
+        margin-top: 14pt;
+        /* Moves as one block. The balance status lines below each service
+           made this document taller, and without this the notes list splits
+           across the page break — leaving a page carrying two orphaned
+           definitions and nothing else. */
+        break-inside: avoid;
+      }
+      .colophon-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        border-top: 1.5pt solid var(--ink);
+        padding-top: 5pt;
+      }
+      .colophon-brand {
+        font-family: serif;
+        font-size: 10pt;
+      }
+      .asof {
+        font-size: 8pt;
+        color: var(--ink-muted);
+      }
+      .notes {
+        margin: 7pt 0 0;
+        font-size: 7.5pt;
+      }
+      .notes dt {
+        float: left;
+        clear: left;
+        width: 72pt;
+        font-size: 6.5pt;
+        font-weight: 600;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: #6f6f6f;
+        line-height: 1.8;
+      }
+      .notes dd {
+        margin: 0 0 2pt 78pt;
+        color: var(--ink-muted);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="masthead-top">
+        <span class="wordmark">
+          <svg viewBox="0 0 32 32" fill="none">
+            <circle
+              cx="16"
+              cy="16"
+              r="13"
+              stroke="currentColor"
+              stroke-width="1.2"
+              opacity="0.7"
+            />
+            <path d="M16 4 L18 16 L16 28 L14 16 Z" fill="#B5651D" />
+            <path
+              d="M4 16 L16 14 L28 16 L16 18 Z"
+              fill="currentColor"
+              opacity="0.55"
+            />
+            <circle cx="16" cy="16" r="1.6" fill="currentColor" />
+            <g stroke="currentColor" stroke-width="1" opacity="0.45">
+              <line x1="16" y1="1" x2="16" y2="3" />
+              <line x1="16" y1="29" x2="16" y2="31" />
+              <line x1="1" y1="16" x2="3" y2="16" />
+              <line x1="29" y1="16" x2="31" y2="16" />
+            </g>
+          </svg>
+          CostCompass
+        </span>
+        <span class="label">Spend report</span>
+      </div>
+      <h1>April 2026 Month-to-Date Report</h1>
+      <p class="sub">
+        Every connected service, what it cost this month, and where the money
+        went inside it.
+      </p>
+    </header>
+
+    
+    <section class="ring-block">
+      <div class="ring-holder">
+        <svg viewBox="0 0 260 260">
+          <g transform="rotate(-90 130 130)" fill="none"
+             stroke-width="46.0">
+            
+            <circle cx="130" cy="130" r="100.0"
+                    stroke="#4F86F7"
+                    stroke-dasharray="628.32 0.00"
+                    stroke-dashoffset="-0.00"></circle>
+            
+          </g>
+        </svg>
+        <div class="ring-center">
+          <div class="label">Total Spending</div>
+          <div class="ring-total">$12.00</div>
+          
+        </div>
+      </div>
+
+      <div class="legend-col">
+      <table class="legend">
+        
+        <tr>
+          <td class="swatch-cell">
+            <span class="swatch"
+                  style="background: #4F86F7"></span>
+          </td>
+          <td>
+            Design tool
+            
+          </td>
+          <td class="num">
+            $12.00
+            <div class="leg-sub">100%</div>
+          </td>
+        </tr>
+        
+      </table>
+      
+      </div>
+    </section>
+    
+
+    <div class="label sections-label">Service detail</div>
+    
+    <section class="svc">
+      <div class="svc-head">
+        <div class="svc-name">
+          <span class="swatch"
+                style="background: #4F86F7"></span>
+          Design tool
+          
+        </div>
+        <div class="svc-figures">
+          <div class="svc-total">$12.00</div>
+          <div class="svc-meta">
+            100% of total
+          </div>
+          
+        </div>
+      </div>
+
+      
+
+      
+      
+    </section>
+    
+
+    
+
+    <footer class="colophon">
+      <div class="colophon-bar">
+        <span class="colophon-brand">CostCompass</span>
+        <span class="asof">Generated 2026-04-15T12:00:00Z</span>
+      </div>
+      <dl class="notes">
+        <dt>Percentages</dt>
+        <dd>Share of the $12.00 month-to-date total.</dd>
+        <dt>Subscriptions</dt>
+        <dd>Prorated to the days elapsed this month.</dd>
+        <dt>Left</dt>
+        <dd>
+          Credit remaining on the account, in whatever unit the service
+          reports — money for most, its own unit for some.
+        </dd>
+        <dt>Freshness</dt>
+        <dd>
+          A service shows an age or warning only when its data needs attention.
+        </dd>
+      </dl>
+    </footer>
+  </body>
+</html>

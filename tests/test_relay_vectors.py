@@ -5,7 +5,7 @@
 #   RelayVectorsTests.swift. All three load the SAME committed corpus, so a
 # change to the browser's expected output forces this suite to conform or
 # break. The corpus is vendored under tests/vectors/relay/ (kept byte-identical
-# to the monorepo's test-vectors/relay/ by scripts/sync-relay-vectors.sh).
+# to the monorepo's test-vectors/relay/ by scripts/sync-test-vectors.sh).
 # See "Three relay implementations" in the monorepo root CLAUDE.md.
 
 """Cross-implementation golden vectors: the CLI relay must decrypt/sign/hash

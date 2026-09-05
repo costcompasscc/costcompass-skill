@@ -1,0 +1,12 @@
+dashboard-hero/00	$0.00
+dashboard-hero/01	$0.00
+dashboard-hero/02	$0.00
+dashboard-hero/03	—
+dashboard-hero/04	—
+dashboard-hero/05	—
+dashboard-hero/06	—
+dashboard-hero/07	—
+dashboard-hero/08	—
+dashboard-hero/09	—
+dashboard-hero/10	—
+report/00	Generated 15 April 2026, 12:00 UTC

@@ -1,0 +1,83 @@
+{
+  "_comment": "AUTHORED. The ?provider= scope, which design 1.1 lists because it is a different code path from the portfolio view \u2014 most visibly per_provider_burn, which is null under a filter and populated without one. Seeded identically to metered-usage so the difference between this scenario's summary.json and that one is attributable to the filter alone and nothing else. NOTE the scope is PER SURFACE, not per directory: only /dashboard/summary and /dashboard/trend accept provider/instance_key. /dashboard/breakdown and /report take no filter at all, so their files here are portfolio payloads and must not be read as evidence of filtered behaviour. That is not a defect in the fixture \u2014 it is what a user with a provider selected actually sees, a filtered hero and trend beside a portfolio breakdown, with the report a separate portfolio route.",
+  "name": "provider-filtered",
+  "request": {
+    "_comment": "Per-surface request scope. A surface named here is called with these parameters; a surface absent is called with none. The capture code reads this map rather than applying one request to everything, so a scenario cannot silently claim a scope the route does not support.",
+    "summary.json": {
+      "provider": "anthropic",
+      "instance_key": ""
+    },
+    "trend.json": {
+      "provider": "anthropic",
+      "instance_key": ""
+    }
+  },
+  "seed": {
+    "cards": [
+      {
+        "provider_id": "anthropic",
+        "display_name": "Anthropic",
+        "last_fetched_at": "2026-04-15T11:30:00Z",
+        "last_status": "success",
+        "window_complete": true
+      },
+      {
+        "provider_id": "openai",
+        "display_name": "OpenAI",
+        "last_fetched_at": "2026-04-15T11:45:00Z",
+        "last_status": "success",
+        "window_complete": true
+      }
+    ],
+    "usage_daily": [
+      {
+        "provider_id": "anthropic",
+        "model": "claude-opus-4",
+        "date_utc": "2026-04-02",
+        "cost_usd": 18.4
+      },
+      {
+        "provider_id": "anthropic",
+        "model": "claude-opus-4",
+        "date_utc": "2026-04-11",
+        "cost_usd": 22.6
+      },
+      {
+        "provider_id": "anthropic",
+        "model": "claude-sonnet-4",
+        "date_utc": "2026-04-12",
+        "cost_usd": 7.25
+      },
+      {
+        "provider_id": "openai",
+        "model": "gpt-4o",
+        "date_utc": "2026-04-05",
+        "cost_usd": 9.1
+      },
+      {
+        "provider_id": "openai",
+        "model": "gpt-4o",
+        "date_utc": "2026-04-14",
+        "cost_usd": 4.35
+      },
+      {
+        "provider_id": "openai",
+        "model": "gpt-4o-mini",
+        "date_utc": "2026-04-14",
+        "cost_usd": 0.004
+      },
+      {
+        "provider_id": "anthropic",
+        "model": "claude-opus-4",
+        "date_utc": "2026-03-20",
+        "cost_usd": 31.5
+      },
+      {
+        "provider_id": "openai",
+        "model": "gpt-4o",
+        "date_utc": "2026-03-28",
+        "cost_usd": 12.0
+      }
+    ]
+  }
+}

@@ -1,0 +1,6 @@
+mtd/00	$8.75
+mtd-staleness/00	Not updated: Anthropic (Claude) (never fetched), OpenAI (40 days). Run 'costcompass mtd refresh --vault' for the latest numbers.
+breakdown/00	  $6.50  OpenAI
+breakdown/01	  $2.25  Mock Provider
+breakdown/02	  -----
+breakdown/03	  $8.75  Total

@@ -1,0 +1,6 @@
+mtd/00	$14.95
+mtd/01	(1 service hasn't finished loading this month's data yet — this total may be low)
+breakdown/00	  $11.75  Anthropic (Claude)
+breakdown/01	   $3.20  OpenAI
+breakdown/02	  ------
+breakdown/03	  $14.95  Total

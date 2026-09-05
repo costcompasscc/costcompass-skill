@@ -1,0 +1,63 @@
+{
+  "_comment": "AUTHORED. The scenarios and surfaces this corpus must carry. A scenario directory that goes missing, or a surface file that is not captured, fails a test rather than reading as a state nobody needed. Do not derive this from what is on disk \u2014 deriving it would make a silent deletion invisible, which is the whole failure it exists to catch.",
+  "scenarios": [
+    {
+      "name": "empty",
+      "why": "No rows at all \u2014 the degenerate path (design 1.1)."
+    },
+    {
+      "name": "metered-usage",
+      "why": "The ordinary path: two providers, several models, current-month and prior-month/7-day data. Not in design 1.1's list; added because that list exercises no single scenario covering summary, per-provider burn, trend, model breakdown, card ordering and report reconciliation together."
+    },
+    {
+      "name": "subscriptions-only",
+      "why": "Money with no usage events (design 1.1; design 4.2 depends on this shape too)."
+    },
+    {
+      "name": "stale-cards",
+      "why": "stale_cards populated and newest_fetched_at old. Separate from incomplete-cards because the two fields are computed and rendered independently."
+    },
+    {
+      "name": "incomplete-cards",
+      "why": "incomplete_card_count non-zero \u2014 the caveat surface has its own payload field."
+    },
+    {
+      "name": "provider-filtered",
+      "why": "The ?provider= scope is a different code path from the portfolio view (design 1.1)."
+    }
+  ],
+  "surfaces": [
+    {
+      "file": "summary.json",
+      "why": "GET /api/v1/dashboard/summary \u2014 carries mtd_usd, which 5 renames."
+    },
+    {
+      "file": "breakdown.json",
+      "why": "GET /api/v1/dashboard/breakdown \u2014 carries the per-card and per-model cost_usd scalars, which 5 replaces with per-schema shapes."
+    },
+    {
+      "file": "trend.json",
+      "why": "GET /api/v1/dashboard/trend?days=30 \u2014 carries TrendPointOut.cost_usd."
+    },
+    {
+      "file": "report.json",
+      "why": "GET /api/v1/report \u2014 carries total_usd and balance_total_usd, which 7.0 removes rather than restyles."
+    },
+    {
+      "file": "report.html",
+      "why": "report_pdf.render_html() \u2014 the PDF's markup. The bytes are not goldened, but every scenario's report IS rendered to PDF as a smoke assertion, so a layout the native stack cannot produce is caught; see README.md."
+    },
+    {
+      "file": "web-render.txt",
+      "why": "The web components' rendered values, extracted per the README's .tabular contract. This is where 1's 'unchanged' claim is actually checked."
+    },
+    {
+      "file": "macos-render.txt",
+      "why": "MenuBarTitle over the decoded summary, both display modes. The macOS client is a separate renderer with its own cache."
+    },
+    {
+      "file": "cli-render.txt",
+      "why": "The sibling CLI renderer's format_amount, format_breakdown, and format_details output. This is the terminal surface where missing legacy money keys otherwise silently display as $0.00."
+    }
+  ]
+}

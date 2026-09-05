@@ -1,0 +1,18 @@
+{
+  "_comment": "AUTHORED. Money with no usage events at all \u2014 design 1.1 names it because a flat fee reaches the totals through subscription_service rather than through usage_events_daily, and 4.2 depends on this shape too. The subscription is generic ('Other'): it has no provider_id, so it cannot fold into a card and renders as a standalone breakdown row keyed by its own id. That id is authored here because query_service puts it on the wire (provider_id=sid) and SubscriptionRepo.create would otherwise mint a random one, which would make every re-capture differ.",
+  "name": "subscriptions-only",
+  "seed": {
+    "subscriptions": [
+      {
+        "id": "sub-golden-standalone-0001",
+        "name": "Design tool",
+        "monthly_usd": 24.0,
+        "started_on": "2026-01-01",
+        "ended_on": null
+      }
+    ]
+  },
+  "request": {
+    "_comment": "Portfolio view: no surface is scoped. Present and empty rather than absent, so an unscoped scenario is a stated fact and not an omission."
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "_comment": "AUTHORED. The incomplete-window caveat, kept separate from stale-cards because incomplete_card_count and stale_cards are computed and rendered independently \u2014 a combined scenario can hide a regression in either. All three cards are FRESH (fetched within the hour), so stale_cards is empty and incomplete_card_count is the only caveat on the payload. count_incomplete_windows counts only last_window_complete IS FALSE, never NULL, so the three cards below are one FALSE, one TRUE and one NULL: the count must be 1, and a change that started counting NULL as incomplete would badge two.",
+  "name": "incomplete-cards",
+  "seed": {
+    "cards": [
+      {
+        "provider_id": "anthropic",
+        "display_name": "Anthropic",
+        "last_fetched_at": "2026-04-15T11:10:00Z",
+        "last_status": "success",
+        "window_complete": false
+      },
+      {
+        "provider_id": "openai",
+        "display_name": "OpenAI",
+        "last_fetched_at": "2026-04-15T11:20:00Z",
+        "last_status": "success",
+        "window_complete": true
+      },
+      {
+        "provider_id": "mock",
+        "display_name": "Mock",
+        "last_fetched_at": "2026-04-15T11:30:00Z",
+        "last_status": "success",
+        "window_complete": null
+      }
+    ],
+    "usage_daily": [
+      {
+        "provider_id": "anthropic",
+        "model": "claude-opus-4",
+        "date_utc": "2026-04-13",
+        "cost_usd": 11.75
+      },
+      {
+        "provider_id": "openai",
+        "model": "gpt-4o",
+        "date_utc": "2026-04-13",
+        "cost_usd": 3.2
+      }
+    ]
+  },
+  "request": {
+    "_comment": "Portfolio view: no surface is scoped. Present and empty rather than absent, so an unscoped scenario is a stated fact and not an omission."
+  }
+}

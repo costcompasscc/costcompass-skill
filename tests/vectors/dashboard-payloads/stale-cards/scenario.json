@@ -1,0 +1,45 @@
+{
+  "_comment": "AUTHORED. The stale-card caveat surface. Three enabled cards against the frozen clock 2026-04-15T12:00:00Z: one never fetched, one 40 days behind, one fetched an hour ago. UserProviderRepo.stale_cards orders never-fetched first then oldest first, so this scenario pins that ordering as well as the membership \u2014 every client truncates the list, so the order is part of the contract. The fresh card is here so newest_fetched_at is a real MAX over a mixed set rather than a single value, which is the case where one fresh card can speak for stale siblings.",
+  "name": "stale-cards",
+  "seed": {
+    "cards": [
+      {
+        "provider_id": "anthropic",
+        "display_name": "Anthropic",
+        "last_fetched_at": null,
+        "last_status": "pending"
+      },
+      {
+        "provider_id": "openai",
+        "display_name": "OpenAI",
+        "last_fetched_at": "2026-03-06T09:00:00Z",
+        "last_status": "success",
+        "window_complete": true
+      },
+      {
+        "provider_id": "mock",
+        "display_name": "Mock",
+        "last_fetched_at": "2026-04-15T11:00:00Z",
+        "last_status": "success",
+        "window_complete": true
+      }
+    ],
+    "usage_daily": [
+      {
+        "provider_id": "openai",
+        "model": "gpt-4o",
+        "date_utc": "2026-04-03",
+        "cost_usd": 6.5
+      },
+      {
+        "provider_id": "mock",
+        "model": "mock-large",
+        "date_utc": "2026-04-14",
+        "cost_usd": 2.25
+      }
+    ]
+  },
+  "request": {
+    "_comment": "Portfolio view: no surface is scoped. Present and empty rather than absent, so an unscoped scenario is a stated fact and not an omission."
+  }
+}

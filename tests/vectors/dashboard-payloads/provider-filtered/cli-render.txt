@@ -1,0 +1,15 @@
+mtd/00	$48.25
+breakdown/00	  $48.25  Anthropic (Claude)
+breakdown/01	  $13.45  OpenAI
+breakdown/02	  ------
+breakdown/03	  $61.70  Total
+details-00/00	Anthropic (Claude) — $48.25 month-to-date
+details-00/01	  7-day daily burn : $4.26
+details-00/02	  forecast (next)  : $132.19
+details-00/03	  days remaining   : 15
+details-00/04	  previous month   : $31.50
+details-00/05	  data as of       : 2026-04-15T11:30:00Z
+details-00/06	
+details-00/07	  Models:
+details-00/08	    Claude Opus 4                    $41.00
+details-00/09	    Claude Sonnet 4                  $7.25

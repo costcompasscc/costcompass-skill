@@ -1,0 +1,8 @@
+{
+  "_comment": "AUTHORED. A brand-new account: no cards, no usage, no subscriptions. The degenerate path design 1.1 names first \u2014 every total is zero and every list is empty, which is the one shape where a renderer is most likely to substitute a placeholder or a dash.",
+  "name": "empty",
+  "seed": {},
+  "request": {
+    "_comment": "Portfolio view: no surface is scoped. Present and empty rather than absent, so an unscoped scenario is a stated fact and not an omission."
+  }
+}

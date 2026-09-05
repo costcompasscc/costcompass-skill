@@ -1,0 +1,19 @@
+dashboard-hero/00	$14.95
+dashboard-hero/01	$66.21
+dashboard-hero/02	$66.21
+dashboard-hero/03	—
+dashboard-hero/04	—
+dashboard-hero/05	$2.14 / day
+dashboard-hero/06	$2.14 / day
+dashboard-hero/07	—
+dashboard-hero/08	—
+dashboard-hero/09	—
+dashboard-hero/10	—
+dashboard-breakdown/00	$11.75
+dashboard-breakdown/01	$3.20
+report/00	$14.95
+report/01	$11.7579%
+report/02	$3.2021%
+report/03	$11.75
+report/04	$3.20
+report/05	Generated 15 April 2026, 12:00 UTC

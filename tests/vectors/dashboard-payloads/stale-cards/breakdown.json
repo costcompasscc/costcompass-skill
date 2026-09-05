@@ -1,0 +1,40 @@
+[
+  {
+    "breakdown_label": "Breakdown",
+    "cost_usd": 6.5,
+    "display_name": "OpenAI",
+    "instance_key": "",
+    "kind": "provider",
+    "model_breakdown": [
+      {
+        "cost_usd": 6.5,
+        "display_name": "GPT-4o",
+        "display_value": null,
+        "group": null,
+        "model": "gpt-4o",
+        "surface": null,
+        "value_tooltip": null
+      }
+    ],
+    "provider_id": "openai"
+  },
+  {
+    "breakdown_label": "Breakdown",
+    "cost_usd": 2.25,
+    "display_name": "Mock Provider",
+    "instance_key": "",
+    "kind": "provider",
+    "model_breakdown": [
+      {
+        "cost_usd": 2.25,
+        "display_name": "mock-large",
+        "display_value": null,
+        "group": null,
+        "model": "mock-large",
+        "surface": null,
+        "value_tooltip": null
+      }
+    ],
+    "provider_id": "mock"
+  }
+]
