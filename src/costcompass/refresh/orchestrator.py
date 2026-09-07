@@ -1039,7 +1039,7 @@ def _run(
         # Scope the closing MTD to the refreshed service, else the whole-account
         # total — so ``mtd google refresh`` reports google's number, not the sum.
         summary = client.summary(provider=scoped_provider)
-        mtd_usd = float(summary.get("mtd_usd") or 0.0)
+        mtd_usd = float(api.required_money(summary, "mtd_usd"))
         echo(f"\nMonth-to-date: {money(mtd_usd)}")
         return RefreshResult(outcomes=outcomes, mtd_usd=mtd_usd)
     finally:

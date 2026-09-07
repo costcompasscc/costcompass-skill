@@ -26,18 +26,19 @@ reads the total together — one round-trip, not two:
 CC="${CLAUDE_PLUGIN_ROOT}/bin/costcompass"
 "$CC" auth status --json || true
 echo '--- mtd ---'
-"$CC" mtd --json || true
+"$CC" mtd --json || printf 'CostCompass spend command failed (exit %s).\n' "$?" >&2
 ```
 
-The `|| true` on **both** lines is not cargo-cult. `auth status` deliberately
-exits 1 when `ready.spend` is false, and `mtd` exits 1 when there's no usable
-key; without the guard the harness renders a red `Error: Exit code 1` above your
-reply, telling the user their setup is broken when in fact the command answered
-what it was asked. Errors go to stderr and are noise for you; the two JSON
-objects on stdout (split by the `--- mtd ---` line) are what you read.
+The auth guard allows the readiness JSON to be read even when `auth status`
+exits 1 for missing setup. The spend guard records a nonzero exit on stderr
+while keeping the combined Bash call usable. Read both streams: stdout carries
+JSON separated by `--- mtd ---`; stderr carries diagnostics and the failure
+marker. A successful combined Bash call does not prove the spend command
+succeeded, and a failed spend command may produce no JSON.
 
 First run also builds the CLI's virtualenv and prints a one-time setup line to
-stderr — expected, needs network, a few seconds.
+stderr — expected, needs network, a few seconds. This setup notice is distinct
+from a failed command; do not discard error diagnostics.
 
 **Read `ready` out of the first JSON — don't re-derive it from the parts:**
 
@@ -51,7 +52,14 @@ stderr — expected, needs network, a few seconds.
 }
 ```
 
-- **`ready.spend` true** → summarize the `mtd` JSON (see Presentation).
+- **`ready.spend` true and the spend command succeeded with valid JSON** →
+  summarize the `mtd` JSON (see Presentation).
+- **`ready.spend` true but the spend command failed or returned no valid JSON** →
+  report that spend could not be read and relay the CLI's error in plain
+  language. For an incompatible response, tell the user to update the
+  CostCompass CLI/plugin and try again. Do not report zero, infer missing money
+  fields, or use partial output as a successful result. Apply this rule to
+  totals, service details, breakdowns, subscriptions, and refresh alike.
 - **`ready.spend` false** → you cannot answer any spend question. **Ignore the
   `mtd` output entirely** (it only errored), then load the reference file and
   follow its "Fix: API key" section:

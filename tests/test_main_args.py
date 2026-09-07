@@ -222,7 +222,12 @@ def test_details_json(clean_env, monkeypatch):
             return None
 
         def summary(self, provider=None):
-            return {"mtd_usd": 5.0}
+            return {
+                "mtd_usd": 5.0,
+                "burn_rate_7day": 0.0,
+                "forecast_usd": 0.0,
+                "previous_month_usd": 0.0,
+            }
 
         def providers(self):
             return [
@@ -614,6 +619,9 @@ class _StaleClient:
     def summary(self, provider=None):
         return {
             "mtd_usd": 7.0,
+            "burn_rate_7day": 0.0,
+            "forecast_usd": 0.0,
+            "previous_month_usd": 0.0,
             "enabled_provider_count": 1,
             "newest_fetched_at": _stale_iso(12),
             # The server decides which cards are behind and by how much; this

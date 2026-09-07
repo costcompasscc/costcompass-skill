@@ -132,7 +132,12 @@ def test_format_details_headline_and_models():
 
 
 def test_format_details_display_value_for_unpriced():
-    summary = {"mtd_usd": 0.0}
+    summary = {
+        "mtd_usd": 0.0,
+        "burn_rate_7day": 0.0,
+        "forecast_usd": 0.0,
+        "previous_month_usd": 0.0,
+    }
     models = [
         {
             "model": "q",
@@ -147,7 +152,12 @@ def test_format_details_display_value_for_unpriced():
 
 
 def test_format_details_surface_ordering():
-    summary = {"mtd_usd": 10.0}
+    summary = {
+        "mtd_usd": 10.0,
+        "burn_rate_7day": 0.0,
+        "forecast_usd": 0.0,
+        "previous_month_usd": 0.0,
+    }
     models = [
         {
             "model": "c",

@@ -6,6 +6,7 @@ The underlying ``httpx.Client`` is injectable so tests can supply an
 
 from __future__ import annotations
 
+import math
 import time
 from typing import Any
 
@@ -35,6 +36,25 @@ class ApiError(Exception):
     def __init__(self, message: str, *, status: int | None = None) -> None:
         super().__init__(message)
         self.status = status
+
+
+def required_money(payload: dict[str, Any], field: str) -> float:
+    """Read a required JSON money scalar without inventing zero spend.
+
+    Field names are caller-owned constants; never include response values in
+    the error, since an incompatible response may contain sensitive material.
+    """
+    value = payload.get(field)
+    try:
+        valid = type(value) in (int, float) and math.isfinite(value)
+    except OverflowError:
+        valid = False
+    if not valid:
+        raise ApiError(
+            f"Incompatible API response: required money field '{field}' is missing "
+            "or invalid. Update the CostCompass CLI/plugin and try again."
+        )
+    return value
 
 
 def is_ambiguous_failure(exc: ApiError) -> bool:

@@ -10,6 +10,8 @@ import re
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
+from .api import required_money
+
 # C0 + C1 control characters (includes ESC 0x1b, which starts every ANSI/CSI/OSC
 # sequence). Field values rendered here are single-line, so we drop control
 # characters outright. Provider/model/display strings originate from upstream API
@@ -174,7 +176,7 @@ def format_amount(summary: dict[str, Any]) -> str:
     this is the whole output of ``costcompass mtd``, so a figure printed bare
     reads as settled even when the server knows part of the month is missing.
     """
-    amount = money(summary.get("mtd_usd", 0.0))
+    amount = money(required_money(summary, "mtd_usd"))
     note = incomplete_window_note(summary)
     return f"{amount}\n{note}" if note else amount
 
@@ -193,14 +195,14 @@ def format_breakdown(cards: list[dict[str, Any]]) -> str:
     cost, with a reconciling total. ``cards`` is the /dashboard/breakdown
     payload, where a folded plan fee already sits inside its provider's
     ``cost_usd`` and a standalone subscription is its own row."""
-    rows = sorted(cards, key=lambda c: -(c.get("cost_usd") or 0.0))
-    total = sum(c.get("cost_usd") or 0.0 for c in cards)
+    rows = sorted(cards, key=lambda c: -(required_money(c, "cost_usd")))
+    total = sum(required_money(c, "cost_usd") for c in cards)
     width = max(
-        [len(money(c.get("cost_usd") or 0.0)) for c in rows] + [len(money(total))]
+        [len(money(required_money(c, "cost_usd"))) for c in rows] + [len(money(total))]
     )
     lines: list[str] = []
     for c in rows:
-        amount = money(c.get("cost_usd") or 0.0)
+        amount = money(required_money(c, "cost_usd"))
         name = safe_text(c.get("display_name") or c.get("provider_id") or "")
         kind = c.get("kind") or "provider"
         tag = "" if kind == "provider" else f"  ({safe_text(kind)})"
@@ -212,7 +214,7 @@ def format_breakdown(cards: list[dict[str, Any]]) -> str:
 
 def _model_value(row: dict[str, Any]) -> str:
     """Cost for a model row, or its display_value when unpriced."""
-    cost = row.get("cost_usd") or 0.0
+    cost = required_money(row, "cost_usd")
     if cost == 0 and row.get("display_value"):
         return safe_text(row["display_value"])
     return money(cost)
@@ -230,11 +232,11 @@ def format_details(
 ) -> str:
     """Headline metrics + per-model breakout grouped by surface."""
     lines: list[str] = [
-        f"{safe_text(display_name)} — {money(summary.get('mtd_usd', 0.0))} month-to-date",
-        f"  7-day daily burn : {money(summary.get('burn_rate_7day', 0.0))}",
-        f"  forecast (next)  : {money(summary.get('forecast_usd', 0.0))}",
+        f"{safe_text(display_name)} — {money(required_money(summary, 'mtd_usd'))} month-to-date",
+        f"  7-day daily burn : {money(required_money(summary, 'burn_rate_7day'))}",
+        f"  forecast (next)  : {money(required_money(summary, 'forecast_usd'))}",
         f"  days remaining   : {summary.get('days_remaining', 0)}",
-        f"  previous month   : {money(summary.get('previous_month_usd', 0.0))}",
+        f"  previous month   : {money(required_money(summary, 'previous_month_usd'))}",
     ]
     if summary.get("newest_fetched_at"):
         lines.append(f"  data as of       : {safe_text(summary['newest_fetched_at'])}")
@@ -251,7 +253,7 @@ def format_details(
         models,
         key=lambda r: (
             _surface_sort_key(r.get("surface")),
-            -(r.get("cost_usd") or 0.0),
+            -(required_money(r, "cost_usd")),
         ),
     )
     lines.append("")

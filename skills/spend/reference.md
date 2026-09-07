@@ -144,8 +144,9 @@ ${CLAUDE_PLUGIN_ROOT}/bin/costcompass mtd <service> --json          # one servic
 ${CLAUDE_PLUGIN_ROOT}/bin/costcompass mtd <service> details --json  # that service's totals + per-model breakout
 ```
 
-Chain the matching command after `auth status --json || true` (guarded with
-`|| true`), exactly as the hot path does for the bare total — so a service or
+Chain the matching command after `auth status --json || true`, using the hot
+path's spend failure guard to preserve diagnostics and record a nonzero exit.
+Apply the failed-spend branch in `SKILL.md` before summarizing any output — so a service or
 breakdown request is still one round-trip.
 
 For "where's my money / which costs the most / what's in my total", use

@@ -179,16 +179,16 @@ def _card_payload(card: dict[str, Any]) -> dict[str, Any]:
         "display_name": card.get("display_name"),
         "kind": card.get("kind") or "provider",
         "instance_key": card.get("instance_key", ""),
-        "cost_usd": card.get("cost_usd") or 0.0,
+        "cost_usd": api.required_money(card, "cost_usd"),
     }
 
 
 def _breakdown_payload(cards: list[dict[str, Any]]) -> dict[str, Any]:
     return {
-        "total_usd": round(sum(c.get("cost_usd") or 0.0 for c in cards), 4),
+        "total_usd": round(sum(api.required_money(c, "cost_usd") for c in cards), 4),
         "cards": [
             _card_payload(c)
-            for c in sorted(cards, key=lambda x: -(x.get("cost_usd") or 0.0))
+            for c in sorted(cards, key=lambda x: -(api.required_money(x, "cost_usd")))
         ],
     }
 
@@ -333,7 +333,7 @@ def mtd(
                     f"Unknown service '{act.service}'. "
                     f"Available: {services.available_names(providers, subs)}"
                 )
-            cost = sub.get("cost_usd") or 0.0
+            cost = api.required_money(sub, "cost_usd")
             label = sub.get("display_name") or act.service
             text = (
                 render.money(cost)
