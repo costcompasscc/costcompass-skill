@@ -1,8 +1,40 @@
 {
   "balance_caveat": null,
   "balance_stale_count": 0,
-  "balance_total_usd": null,
   "balance_unavailable_count": 0,
+  "currencies": [
+    {
+      "balance_total": null,
+      "currency": "USD",
+      "slices": [
+        {
+          "amount": 6.5,
+          "balance_display": null,
+          "balance_status": null,
+          "color_index": 0,
+          "display_name": "OpenAI",
+          "fraction": 0.7428571428571429,
+          "key": "provider:openai:",
+          "member_count": 1,
+          "percent_label": "74%",
+          "start_fraction": 0.0
+        },
+        {
+          "amount": 2.25,
+          "balance_display": null,
+          "balance_status": null,
+          "color_index": 1,
+          "display_name": "Mock Provider",
+          "fraction": 0.2571428571428571,
+          "key": "provider:mock:",
+          "member_count": 1,
+          "percent_label": "26%",
+          "start_fraction": 0.7428571428571429
+        }
+      ],
+      "total": 8.75
+    }
+  ],
   "generated_at_utc": "2026-04-15T12:00:00Z",
   "no_activity": [
     {
@@ -10,6 +42,7 @@
       "display_name": "Anthropic (Claude)"
     }
   ],
+  "primary_currency": null,
   "services": [
     {
       "attention": {
@@ -19,15 +52,22 @@
       "balance_display": null,
       "balance_status": null,
       "breakdown_label": "Breakdown",
-      "color_index": 0,
-      "cost_usd": 6.5,
+      "currencies": [
+        {
+          "amount": 6.5,
+          "color_index": 0,
+          "currency": "USD",
+          "fraction": 0.7428571428571429,
+          "percent_label": "74%"
+        }
+      ],
       "display_name": "OpenAI",
-      "fraction": 0.7428571428571429,
       "free_lines": [],
       "key": "provider:openai:",
       "model_breakdown": [
         {
-          "cost_usd": 6.5,
+          "amount": 6.5,
+          "currency": "USD",
           "display_name": "GPT-4o",
           "display_value": null,
           "group": null,
@@ -35,23 +75,29 @@
           "surface": null,
           "value_tooltip": null
         }
-      ],
-      "percent_label": "74%"
+      ]
     },
     {
       "attention": null,
       "balance_display": null,
       "balance_status": null,
       "breakdown_label": "Breakdown",
-      "color_index": 1,
-      "cost_usd": 2.25,
+      "currencies": [
+        {
+          "amount": 2.25,
+          "color_index": 1,
+          "currency": "USD",
+          "fraction": 0.2571428571428571,
+          "percent_label": "26%"
+        }
+      ],
       "display_name": "Mock Provider",
-      "fraction": 0.2571428571428571,
       "free_lines": [],
       "key": "provider:mock:",
       "model_breakdown": [
         {
-          "cost_usd": 2.25,
+          "amount": 2.25,
+          "currency": "USD",
           "display_name": "mock-large",
           "display_value": null,
           "group": null,
@@ -59,37 +105,9 @@
           "surface": null,
           "value_tooltip": null
         }
-      ],
-      "percent_label": "26%"
+      ]
     }
   ],
-  "slices": [
-    {
-      "balance_display": null,
-      "balance_status": null,
-      "color_index": 0,
-      "cost_usd": 6.5,
-      "display_name": "OpenAI",
-      "fraction": 0.7428571428571429,
-      "key": "provider:openai:",
-      "member_count": 1,
-      "percent_label": "74%",
-      "start_fraction": 0.0
-    },
-    {
-      "balance_display": null,
-      "balance_status": null,
-      "color_index": 1,
-      "cost_usd": 2.25,
-      "display_name": "Mock Provider",
-      "fraction": 0.2571428571428571,
-      "key": "provider:mock:",
-      "member_count": 1,
-      "percent_label": "26%",
-      "start_fraction": 0.7428571428571429
-    }
-  ],
-  "total_usd": 8.75,
   "window_end": "2026-05-01",
   "window_start": "2026-04-01"
 }

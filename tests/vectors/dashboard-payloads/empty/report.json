@@ -1,13 +1,19 @@
 {
   "balance_caveat": null,
   "balance_stale_count": 0,
-  "balance_total_usd": null,
   "balance_unavailable_count": 0,
+  "currencies": [
+    {
+      "balance_total": null,
+      "currency": "USD",
+      "slices": [],
+      "total": 0.0
+    }
+  ],
   "generated_at_utc": "2026-04-15T12:00:00Z",
   "no_activity": [],
+  "primary_currency": null,
   "services": [],
-  "slices": [],
-  "total_usd": 0.0,
   "window_end": "2026-05-01",
   "window_start": "2026-04-01"
 }

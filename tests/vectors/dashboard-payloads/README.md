@@ -24,8 +24,14 @@ says that must not happen.
 
 Deliberately outside the corpus:
 
-- **Multi-currency payloads.** §1 is about the one-currency case; a
-  two-currency fixture would pin a shape that does not exist yet.
+- **Multi-currency payloads.** §1 is about the one-currency case, and this
+  corpus is the evidence for it. The per-currency report shape now exists
+  (design §7.0), so a two-currency scenario is worth having — but
+  `coverage.json` requires every scenario to carry every surface, and
+  `macos-render.txt` / `cli-render.txt` cannot decode a per-currency payload
+  yet. Adding one now would either fail those suites or pin output the clients
+  cannot produce, which is the failure this section exists to prevent. It lands
+  once the macOS and CLI renderers are wired; tracked as its own bead.
 - **Balances.** Sequenced for §11 step 5.
 - **CLI JSON and refresh-flow output.** This corpus covers the CLI's text
   renderer only: `format_amount`, `format_breakdown`, `format_details`,

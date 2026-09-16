@@ -1,8 +1,40 @@
 {
   "balance_caveat": null,
   "balance_stale_count": 0,
-  "balance_total_usd": null,
   "balance_unavailable_count": 0,
+  "currencies": [
+    {
+      "balance_total": null,
+      "currency": "USD",
+      "slices": [
+        {
+          "amount": 11.75,
+          "balance_display": null,
+          "balance_status": null,
+          "color_index": 0,
+          "display_name": "Anthropic (Claude)",
+          "fraction": 0.7859531772575251,
+          "key": "provider:anthropic:",
+          "member_count": 1,
+          "percent_label": "79%",
+          "start_fraction": 0.0
+        },
+        {
+          "amount": 3.2,
+          "balance_display": null,
+          "balance_status": null,
+          "color_index": 1,
+          "display_name": "OpenAI",
+          "fraction": 0.21404682274247494,
+          "key": "provider:openai:",
+          "member_count": 1,
+          "percent_label": "21%",
+          "start_fraction": 0.7859531772575251
+        }
+      ],
+      "total": 14.95
+    }
+  ],
   "generated_at_utc": "2026-04-15T12:00:00Z",
   "no_activity": [
     {
@@ -10,21 +42,29 @@
       "display_name": "Mock Provider"
     }
   ],
+  "primary_currency": null,
   "services": [
     {
       "attention": null,
       "balance_display": null,
       "balance_status": null,
       "breakdown_label": "Breakdown",
-      "color_index": 0,
-      "cost_usd": 11.75,
+      "currencies": [
+        {
+          "amount": 11.75,
+          "color_index": 0,
+          "currency": "USD",
+          "fraction": 0.7859531772575251,
+          "percent_label": "79%"
+        }
+      ],
       "display_name": "Anthropic (Claude)",
-      "fraction": 0.7859531772575251,
       "free_lines": [],
       "key": "provider:anthropic:",
       "model_breakdown": [
         {
-          "cost_usd": 11.75,
+          "amount": 11.75,
+          "currency": "USD",
           "display_name": "Claude Opus 4",
           "display_value": null,
           "group": null,
@@ -32,23 +72,29 @@
           "surface": "ai_usage",
           "value_tooltip": null
         }
-      ],
-      "percent_label": "79%"
+      ]
     },
     {
       "attention": null,
       "balance_display": null,
       "balance_status": null,
       "breakdown_label": "Breakdown",
-      "color_index": 1,
-      "cost_usd": 3.2,
+      "currencies": [
+        {
+          "amount": 3.2,
+          "color_index": 1,
+          "currency": "USD",
+          "fraction": 0.21404682274247494,
+          "percent_label": "21%"
+        }
+      ],
       "display_name": "OpenAI",
-      "fraction": 0.21404682274247494,
       "free_lines": [],
       "key": "provider:openai:",
       "model_breakdown": [
         {
-          "cost_usd": 3.2,
+          "amount": 3.2,
+          "currency": "USD",
           "display_name": "GPT-4o",
           "display_value": null,
           "group": null,
@@ -56,37 +102,9 @@
           "surface": null,
           "value_tooltip": null
         }
-      ],
-      "percent_label": "21%"
+      ]
     }
   ],
-  "slices": [
-    {
-      "balance_display": null,
-      "balance_status": null,
-      "color_index": 0,
-      "cost_usd": 11.75,
-      "display_name": "Anthropic (Claude)",
-      "fraction": 0.7859531772575251,
-      "key": "provider:anthropic:",
-      "member_count": 1,
-      "percent_label": "79%",
-      "start_fraction": 0.0
-    },
-    {
-      "balance_display": null,
-      "balance_status": null,
-      "color_index": 1,
-      "cost_usd": 3.2,
-      "display_name": "OpenAI",
-      "fraction": 0.21404682274247494,
-      "key": "provider:openai:",
-      "member_count": 1,
-      "percent_label": "21%",
-      "start_fraction": 0.7859531772575251
-    }
-  ],
-  "total_usd": 14.95,
   "window_end": "2026-05-01",
   "window_start": "2026-04-01"
 }

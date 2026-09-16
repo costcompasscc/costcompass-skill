@@ -85,6 +85,31 @@
         border: 0.75pt solid var(--rule);
         padding: 12pt;
       }
+      /* More than one currency: a 2×N grid of rings, each with its own honest
+         100%. A printed page paginates better as a grid than as N full-width
+         rings, and the two-up layout is what makes the set read as one
+         document rather than as a sequence of reports.
+         A ring and a legend side by side do not fit in half a page, so inside
+         the grid each card stacks them — which is also how the design's own
+         sketch reads. */
+      .ring-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12pt;
+        margin-top: 16pt;
+      }
+      .ring-grid .ring-block {
+        flex: 1 1 44%;
+        width: 44%;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10pt;
+        margin-top: 0;
+        break-inside: avoid;
+      }
+      .ring-grid .ring-holder {
+        align-self: center;
+      }
       .ring-holder {
         position: relative;
         width: 165pt;
@@ -239,8 +264,15 @@
       .rows tr:last-child td {
         border-bottom: 0;
       }
-      .rows .num {
+      /* §7.3: the amount column sizes to the widest figure on the card, so a
+         label gives up its width before a number breaks. A money figure split
+         across two lines is not a figure anyone should have to reassemble —
+         and with two currencies on one card the widest figure is no longer a
+         dollar one. */
+      .rows .num,
+      .legend .num {
         color: var(--ink-soft);
+        white-space: nowrap;
       }
       .dim {
         color: var(--ink-muted);
@@ -340,6 +372,10 @@
     </header>
 
     
+    
+    
+    
+    
     <section class="ring-block">
       <div class="ring-holder">
         <svg viewBox="0 0 260 260">
@@ -400,8 +436,11 @@
         
       </table>
       
+      
       </div>
     </section>
+    
+    
     
 
     <div class="label sections-label">Service detail</div>
@@ -415,10 +454,13 @@
           
         </div>
         <div class="svc-figures">
+          
+          
           <div class="svc-total">$48.25</div>
           <div class="svc-meta">
             78% of total
           </div>
+          
           
         </div>
       </div>
@@ -457,10 +499,13 @@
           
         </div>
         <div class="svc-figures">
+          
+          
           <div class="svc-total">$13.45</div>
           <div class="svc-meta">
             22% of total
           </div>
+          
           
         </div>
       </div>
@@ -500,7 +545,10 @@
       </div>
       <dl class="notes">
         <dt>Percentages</dt>
-        <dd>Share of the $61.70 month-to-date total.</dd>
+        
+        <dd>
+          Share of the $61.70 month-to-date total.
+        </dd>
         <dt>Subscriptions</dt>
         <dd>Prorated to the days elapsed this month.</dd>
         <dt>Left</dt>
