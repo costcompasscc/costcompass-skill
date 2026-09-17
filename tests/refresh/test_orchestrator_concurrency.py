@@ -114,7 +114,7 @@ def _run_flat(providers: list[str], concurrency: int, rendezvous: int = 0):
                 200, json={"run_id": "run-1", "status": "success", "providers": []}
             )
         if p.endswith("/dashboard/summary"):
-            return httpx.Response(200, json={"mtd_usd": 4.0})
+            return httpx.Response(200, json={"mtd": {"USD": 4.0}})
         return httpx.Response(404, json={"error": p})
 
     def broker_handler(_request: httpx.Request) -> httpx.Response:
@@ -322,7 +322,7 @@ def test_two_concurrent_cards_on_one_sentinel_mint_and_rotate_once():
                 200, json={"run_id": "run-1", "status": "success", "providers": []}
             )
         if p.endswith("/dashboard/summary"):
-            return httpx.Response(200, json={"mtd_usd": 1.0})
+            return httpx.Response(200, json={"mtd": {"USD": 1.0}})
         return httpx.Response(404, json={"error": p})
 
     def oauth_handler(_request: httpx.Request) -> httpx.Response:
@@ -483,7 +483,7 @@ def test_two_providers_rotating_concurrently_are_serialized():
                 200, json={"run_id": "run-1", "status": "success", "providers": []}
             )
         if p.endswith("/dashboard/summary"):
-            return httpx.Response(200, json={"mtd_usd": 2.0})
+            return httpx.Response(200, json={"mtd": {"USD": 2.0}})
         return httpx.Response(404, json={"error": p})
 
     def oauth_handler(request: httpx.Request) -> httpx.Response:

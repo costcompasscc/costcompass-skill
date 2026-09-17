@@ -79,7 +79,7 @@ def test_flat_refresh_end_to_end():
                 200, json={"run_id": "run-1", "status": "success", "providers": []}
             )
         if p.endswith("/dashboard/summary"):
-            return httpx.Response(200, json={"mtd_usd": 9.0})
+            return httpx.Response(200, json={"mtd": {"USD": 9.0}})
         return httpx.Response(404, json={"error": p})
 
     def broker_handler(request: httpx.Request) -> httpx.Response:
@@ -119,7 +119,7 @@ def test_flat_refresh_end_to_end():
     assert submitted["responses"][0]["body_b64"] == "Yg=="
     assert result.outcomes[0].state == "success"
     assert result.outcomes[0].events_ingested == 3
-    assert result.mtd_usd == 9.0
+    assert result.mtd == {"USD": 9.0}
 
 
 def test_progress_ticker_emits_dots_and_trailing_newline():
@@ -167,7 +167,7 @@ def test_progress_no_newline_when_no_ticks():
                 200, json={"run_id": "run-1", "status": "success", "providers": []}
             )
         if p.endswith("/dashboard/summary"):
-            return httpx.Response(200, json={"mtd_usd": 1.0})
+            return httpx.Response(200, json={"mtd": {"USD": 1.0}})
         return httpx.Response(404)
 
     client = api.Client(
@@ -396,7 +396,7 @@ def test_run_mints_from_the_server_vault_fetched_at_run_start():
                 200, json={"run_id": "run-1", "status": "success", "providers": []}
             )
         if p_.endswith("/dashboard/summary"):
-            return httpx.Response(200, json={"mtd_usd": 0.0})
+            return httpx.Response(200, json={"mtd": {"USD": 0.0}})
         return httpx.Response(404)
 
     minted_with: list[str] = []
@@ -678,7 +678,7 @@ def _run_one_entry_capture(blob, run, response_json):
                 200, json={"run_id": "run-1", "status": "x", "providers": []}
             )
         if p.endswith("/dashboard/summary"):
-            return httpx.Response(200, json={"mtd_usd": 0.0})
+            return httpx.Response(200, json={"mtd": {"USD": 0.0}})
         return httpx.Response(404)
 
     client = api.Client(
@@ -814,7 +814,7 @@ def test_aborted_rotation_submits_a_badge_free_skip():
                 200, json={"run_id": "run-1", "status": "x", "providers": []}
             )
         if p_.endswith("/dashboard/summary"):
-            return httpx.Response(200, json={"mtd_usd": 0.0})
+            return httpx.Response(200, json={"mtd": {"USD": 0.0}})
         return httpx.Response(404)
 
     client = api.Client(
@@ -962,7 +962,7 @@ def test_an_aborted_rotation_decides_every_sibling_card(reloaded, marker):
                 200, json={"run_id": "run-1", "status": "x", "providers": []}
             )
         if p_.endswith("/dashboard/summary"):
-            return httpx.Response(200, json={"mtd_usd": 0.0})
+            return httpx.Response(200, json={"mtd": {"USD": 0.0}})
         return httpx.Response(404)
 
     def mint_handler(request: httpx.Request) -> httpx.Response:
@@ -1072,7 +1072,7 @@ def test_oauth_mint_failure_preserves_status():
                 200, json={"run_id": "run-1", "status": "x", "providers": []}
             )
         if p.endswith("/dashboard/summary"):
-            return httpx.Response(200, json={"mtd_usd": 0.0})
+            return httpx.Response(200, json={"mtd": {"USD": 0.0}})
         return httpx.Response(404)
 
     client = api.Client(
@@ -1164,7 +1164,7 @@ def test_oauth_mint_failure_purpose_falls_back_when_plan_has_none():
                 200, json={"run_id": "run-1", "status": "x", "providers": []}
             )
         if p.endswith("/dashboard/summary"):
-            return httpx.Response(200, json={"mtd_usd": 0.0})
+            return httpx.Response(200, json={"mtd": {"USD": 0.0}})
         return httpx.Response(404)
 
     client = api.Client(
@@ -1254,7 +1254,7 @@ def test_oauth_mint_409_marks_body_reauth_required():
                 200, json={"run_id": "run-1", "status": "x", "providers": []}
             )
         if p.endswith("/dashboard/summary"):
-            return httpx.Response(200, json={"mtd_usd": 0.0})
+            return httpx.Response(200, json={"mtd": {"USD": 0.0}})
         return httpx.Response(404)
 
     client = api.Client(
@@ -1361,7 +1361,7 @@ def test_scoped_refresh_shows_label_and_scopes_summary():
             )
         if p.endswith("/dashboard/summary"):
             seen["summary_provider"] = request.url.params.get("provider")
-            return httpx.Response(200, json={"mtd_usd": 42.0})
+            return httpx.Response(200, json={"mtd": {"USD": 42.0}})
         return httpx.Response(404)
 
     brk = broker.BrokerClient(
@@ -1414,7 +1414,7 @@ def test_scoped_refresh_shows_label_and_scopes_summary():
     assert all("card-uuid-1" not in ln for ln in lines)  # raw UUID hidden
     assert seen["summary_provider"] == "google"  # MTD scoped to the service
     assert result.outcomes[0].instance_label == "Prod billing"
-    assert result.mtd_usd == 42.0
+    assert result.mtd == {"USD": 42.0}
 
 
 def test_program_forward_cap_submits_synthetic_and_finalizes():
@@ -1479,7 +1479,7 @@ def test_program_forward_cap_submits_synthetic_and_finalizes():
                 200, json={"run_id": "run-1", "status": "x", "providers": []}
             )
         if p.endswith("/dashboard/summary"):
-            return httpx.Response(200, json={"mtd_usd": 0.0})
+            return httpx.Response(200, json={"mtd": {"USD": 0.0}})
         return httpx.Response(404)
 
     client = api.Client(
@@ -1821,7 +1821,7 @@ def test_a_card_resolved_after_a_mid_run_reload_reads_the_reloaded_document():
                 200, json={"run_id": "run-1", "status": "success", "providers": []}
             )
         if p_.endswith("/dashboard/summary"):
-            return httpx.Response(200, json={"mtd_usd": 0.0})
+            return httpx.Response(200, json={"mtd": {"USD": 0.0}})
         return httpx.Response(404)
 
     def oauth_handler(request: httpx.Request) -> httpx.Response:

@@ -10,6 +10,7 @@ from typing import Any, Optional
 import typer
 
 from . import DISTRIBUTION, api, build_id, config, render, secrets, services
+from . import currency_totals as ct
 from . import vault as vault_mod
 from .refresh import orchestrator
 
@@ -179,24 +180,48 @@ def _card_payload(card: dict[str, Any]) -> dict[str, Any]:
         "display_name": card.get("display_name"),
         "kind": card.get("kind") or "provider",
         "instance_key": card.get("instance_key", ""),
-        "cost_usd": api.required_money(card, "cost_usd"),
+        # Per currency, never a scalar: one card can hold money in two (§7.2).
+        # Validated, so a malformed row fails loud rather than printing $0.
+        "totals": api.required_totals(card, "totals"),
     }
 
 
-def _breakdown_payload(cards: list[dict[str, Any]]) -> dict[str, Any]:
+def _breakdown_payload(
+    cards: list[dict[str, Any]], primary_currency: str | None = None
+) -> dict[str, Any]:
+    validated = [api.required_totals(card, "totals") for card in cards]
+    total: ct.CurrencyTotals = {}
+    for totals in validated:
+        total = ct.merge(total, totals)
+    # Sort the CARDS by their per-currency totals — `compare` reads a totals
+    # map, so handing it the card dict would compare display names.
+    totals_key = ct.comparator(primary_currency)
+    ordered = sorted(
+        cards, key=lambda card: totals_key(api.required_totals(card, "totals"))
+    )
     return {
-        "total_usd": round(sum(api.required_money(c, "cost_usd") for c in cards), 4),
-        "cards": [
-            _card_payload(c)
-            for c in sorted(cards, key=lambda x: -(api.required_money(x, "cost_usd")))
-        ],
+        "totals": {code: round(value, 4) for code, value in total.items()},
+        "cards": [_card_payload(c) for c in ordered],
     }
+
+
+def _reader_preferences(client: api.Client) -> dict[str, Any]:
+    """``display_locale`` / ``primary_currency``, or empty on any failure.
+
+    Display policy only: a CLI that cannot read them must still print the
+    figures, so this degrades to the product defaults rather than failing the
+    command.
+    """
+    try:
+        return client.preferences()
+    except api.ApiError:
+        return {}
 
 
 def _refresh_payload(result: orchestrator.RefreshResult) -> dict[str, Any]:
     """JSON shape for a refresh: the closing MTD plus a per-card outcome list."""
     return {
-        "mtd_usd": result.mtd_usd,
+        "mtd": result.mtd,
         "providers": [
             {
                 "provider_id": o.provider_id,
@@ -271,6 +296,9 @@ def mtd(
 
     try:
         with api.Client(cfg.api_url, key) as client:
+            preferences = _reader_preferences(client)
+            locale = render.locale_of(preferences)
+            primary = render.primary_currency_of(preferences)
             if act.kind == "breakdown":
                 cards = client.breakdown()
                 # The breakdown payload is a bare list with nowhere to carry
@@ -280,8 +308,10 @@ def mtd(
                 note = None if as_json else render.staleness_note(client.summary())
                 _emit(
                     as_json,
-                    _breakdown_payload(cards),
-                    render.format_breakdown(cards),
+                    _breakdown_payload(cards, primary),
+                    render.format_breakdown(
+                        cards, locale=locale, primary_currency=primary
+                    ),
                     note,
                 )
                 return
@@ -290,7 +320,9 @@ def mtd(
                 _emit(
                     as_json,
                     summary,
-                    render.format_amount(summary),
+                    render.format_amount(
+                        summary, locale=locale, primary_currency=primary
+                    ),
                     render.staleness_note(summary),
                 )
                 return
@@ -304,7 +336,9 @@ def mtd(
                     _emit(
                         as_json,
                         summary,
-                        render.format_amount(summary),
+                        render.format_amount(
+                            summary, locale=locale, primary_currency=primary
+                        ),
                         render.staleness_note(summary),
                     )
                 else:
@@ -319,7 +353,13 @@ def mtd(
                     _emit(
                         as_json,
                         payload,
-                        render.format_details(label, summary, models),
+                        render.format_details(
+                            label,
+                            summary,
+                            models,
+                            locale=locale,
+                            primary_currency=primary,
+                        ),
                         render.staleness_note(summary),
                     )
                 return
@@ -333,12 +373,16 @@ def mtd(
                     f"Unknown service '{act.service}'. "
                     f"Available: {services.available_names(providers, subs)}"
                 )
-            cost = api.required_money(sub, "cost_usd")
+            totals = api.required_totals(sub, "totals")
             label = sub.get("display_name") or act.service
             text = (
-                render.money(cost)
+                render.format_amount(
+                    {"mtd": totals}, locale=locale, primary_currency=primary
+                )
                 if act.kind == "service"
-                else render.format_subscription(label, cost)
+                else render.format_subscription(
+                    label, totals, locale=locale, primary_currency=primary
+                )
             )
             # No freshness note: a standalone subscription is a declared plan,
             # not a fetched card, so nothing about it goes stale. The dashboard

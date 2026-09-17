@@ -85,8 +85,10 @@ meanings. For a service or breakdown, chain the matching `mtd …` command after
 ## Presentation
 
 - Summarize; show raw JSON only if the user explicitly asks for it.
-- Lead with the headline `mtd_usd`. Add `forecast_usd` (projected end-of-month)
-  and `burn_rate_7day` (7-day daily burn, includes subscriptions) when relevant.
+- Lead with the headline `mtd`. It is a **map keyed by currency**; report each
+  currency's figure separately and never sum them. Add `forecast` (projected
+  end-of-month) and `burn_rate_7day` (7-day daily burn, includes subscriptions)
+  the same way when relevant.
 - Report the **all-in card total** by default; only break out "subscription vs
   usage" when the user explicitly asks. (Full field meanings in the reference.)
 - Format money plainly (`$131.01`). Note "data as of …" when `newest_fetched_at` is set.

@@ -1,0 +1,411 @@
+{
+  "_comment": "AUTHORED. Read README.md in this directory before changing anything here.",
+  "cases": [
+    {
+      "locale": "en-US",
+      "currency": "USD",
+      "amount": 0,
+      "expected": "$0.00",
+      "why": "Zero, the baseline."
+    },
+    {
+      "locale": "en-US",
+      "currency": "USD",
+      "amount": 0.004,
+      "expected": "< $0.01",
+      "why": "Sub-cent: real spend stays visible rather than rounding away to a misleading $0.00."
+    },
+    {
+      "locale": "en-US",
+      "currency": "USD",
+      "amount": 0.0049,
+      "expected": "< $0.01",
+      "why": "Sub-cent, nearer the floor than the case above."
+    },
+    {
+      "locale": "en-US",
+      "currency": "USD",
+      "amount": 0.005,
+      "expected": "$0.01",
+      "why": "An exact half rounds AWAY FROM ZERO, so this is a real figure rather than '< $0.01'."
+    },
+    {
+      "locale": "en-US",
+      "currency": "USD",
+      "amount": 0.01,
+      "expected": "$0.01",
+      "why": "One cent — the floor as a figure."
+    },
+    {
+      "locale": "en-US",
+      "currency": "USD",
+      "amount": 0.015,
+      "expected": "$0.02",
+      "why": "The classic half. As a double this is 0.014999..., yet both sides must round it UP, because Intl rounds the number's shortest decimal representation and str() of a float is that same representation. Fails if the backend reaches for Decimal(value) instead of Decimal(str(value)), or if the frontend is 'simplified' from toLocaleString to toFixed, which uses the binary value."
+    },
+    {
+      "locale": "en-US",
+      "currency": "USD",
+      "amount": 1.005,
+      "expected": "$1.01",
+      "why": "Same trap as 0.015, one unit up."
+    },
+    {
+      "locale": "en-US",
+      "currency": "USD",
+      "amount": 2.675,
+      "expected": "$2.68",
+      "why": "Same trap again; page said $2.68 and a truncating PDF said $2.67."
+    },
+    {
+      "locale": "en-US",
+      "currency": "USD",
+      "amount": 0.0553,
+      "expected": "$0.06",
+      "why": "THE REPORTED BUG: the page said $0.06 and the PDF said $0.05."
+    },
+    {
+      "locale": "en-US",
+      "currency": "USD",
+      "amount": 0.29,
+      "expected": "$0.29",
+      "why": "A value whose double sits a hair BELOW the cent; truncation printed $0.28. Ordinary, not an edge case."
+    },
+    {
+      "locale": "en-US",
+      "currency": "USD",
+      "amount": 0.57,
+      "expected": "$0.57",
+      "why": "Same again."
+    },
+    {
+      "locale": "en-US",
+      "currency": "USD",
+      "amount": 1.15,
+      "expected": "$1.15",
+      "why": "Same again."
+    },
+    {
+      "locale": "en-US",
+      "currency": "USD",
+      "amount": 1.999,
+      "expected": "$2.00",
+      "why": "Rounds up across the dollar boundary."
+    },
+    {
+      "locale": "en-US",
+      "currency": "USD",
+      "amount": 8.61,
+      "expected": "$8.61",
+      "why": "Ordinary value."
+    },
+    {
+      "locale": "en-US",
+      "currency": "USD",
+      "amount": 57.86,
+      "expected": "$57.86",
+      "why": "Ordinary value."
+    },
+    {
+      "locale": "en-US",
+      "currency": "USD",
+      "amount": 1234.5,
+      "expected": "$1,234.50",
+      "why": "Thousands separator."
+    },
+    {
+      "locale": "en-US",
+      "currency": "USD",
+      "amount": 1234567.891,
+      "expected": "$1,234,567.89",
+      "why": "Two separators, and rounding at the cent."
+    },
+    {
+      "locale": "en-US",
+      "currency": "USD",
+      "amount": -1.5,
+      "expected": "-$1.50",
+      "why": "The sign goes outside the symbol."
+    },
+    {
+      "locale": "en-US",
+      "currency": "USD",
+      "amount": -0.001,
+      "expected": "$0.00",
+      "why": "A negative that rounds to nothing loses the sign entirely: '-$0.00' is not a figure."
+    },
+    {
+      "locale": "en-US",
+      "currency": "ZAR",
+      "amount": 2900,
+      "expected": "ZAR\u00a02,900.00",
+      "why": "USD 5.32 and ZAR 2,900 are the two figures this whole change exists for. An ISO code with no symbol in this locale still gets the locale's currency spacing (U+00A0): a CLDR library that skips currencySpacing prints 'ZAR2,900.00' here."
+    },
+    {
+      "locale": "en-US",
+      "currency": "LKR",
+      "amount": 1234.5,
+      "expected": "LKR\u00a01,234.50",
+      "why": "Second multi-currency pair. Same spacing rule."
+    },
+    {
+      "locale": "en-ZA",
+      "currency": "ZAR",
+      "amount": 1234.5,
+      "expected": "R\u00a01\u00a0234,50",
+      "why": "ZAR DOES have a symbol in en-ZA (and it is 'R', not 'ZAR'), which is why the symbol decision is per (locale, currency) and not per currency."
+    },
+    {
+      "locale": "en-ZA",
+      "currency": "USD",
+      "amount": 12000.5,
+      "expected": "US$12\u00a0000,50",
+      "why": "ICU disambiguates USD to 'US$' in a rand locale, and en-ZA groups with U+00A0 while using ',' as the decimal separator."
+    },
+    {
+      "locale": "en-ZA",
+      "currency": "JPY",
+      "amount": 12000.5,
+      "expected": "JP\u00a512\u00a0001",
+      "why": "Zero-decimal currency in a locale whose group separator is U+00A0: 'JP¥12\\u00a0001', not 'JP¥12,001'."
+    },
+    {
+      "locale": "de-DE",
+      "currency": "USD",
+      "amount": 1234.5,
+      "expected": "1.234,50\u00a0$",
+      "why": "German number shapes with an American currency: the symbol TRAILS, and the group separator is '.'."
+    },
+    {
+      "locale": "de-DE",
+      "currency": "EUR",
+      "amount": 1234.5,
+      "expected": "1.234,50\u00a0\u20ac",
+      "why": "The same locale's own currency."
+    },
+    {
+      "locale": "de-DE",
+      "currency": "ZAR",
+      "amount": 1234.5,
+      "expected": "1.234,50\u00a0ZAR",
+      "why": "A code with no symbol in German trails the number as well — placement follows the READER, not the currency."
+    },
+    {
+      "locale": "de-DE",
+      "currency": "JPY",
+      "amount": 0.4,
+      "expected": "< 1\u00a0\u00a5",
+      "why": "The tiny-spend floor below one yen in a German locale. '< 0.01 €' would be the wrong floor AND the wrong shape."
+    },
+    {
+      "locale": "fr-FR",
+      "currency": "USD",
+      "amount": 1245.5,
+      "expected": "1\u202f245,50\u00a0$US",
+      "why": "French group separator is U+202F (narrow no-break space) — not the U+00A0 en-ZA uses — and USD disambiguates to '$US'."
+    },
+    {
+      "locale": "fr-CH",
+      "currency": "EUR",
+      "amount": 1234.5,
+      "expected": "1\u202f234.50\u00a0\u20ac",
+      "why": "fr-CH writes decimals with '.' and groups with U+202F, unlike fr-FR on both counts."
+    },
+    {
+      "locale": "de-CH",
+      "currency": "USD",
+      "amount": 1234.5,
+      "expected": "$\u00a01'234.50",
+      "why": "Swiss German: ASCII apostrophe grouping (CLDR moved this from U+2019), and the symbol LEADS here while de-DE trails it."
+    },
+    {
+      "locale": "de-CH",
+      "currency": "USD",
+      "amount": -1234.5,
+      "expected": "$-1'234.50",
+      "why": "de-CH puts the minus AFTER the currency symbol. A formatter that assumes '-' goes before the whole thing gets this wrong."
+    },
+    {
+      "locale": "it-IT",
+      "currency": "EUR",
+      "amount": 1234.5,
+      "expected": "1234,50\u00a0\u20ac",
+      "why": "Four digits are NOT grouped: CLDR's minimumGroupingDigits for it/es/pt/pl/hu is 2, so grouping starts at five digits."
+    },
+    {
+      "locale": "es-ES",
+      "currency": "EUR",
+      "amount": 1234.5,
+      "expected": "1234,50\u00a0\u20ac",
+      "why": "The minimumGroupingDigits case. ICU applies it to the currency pattern but NOT to the plain decimal pattern, so 'format a price the way I format a number' is wrong here."
+    },
+    {
+      "locale": "es-ES",
+      "currency": "EUR",
+      "amount": 12345.5,
+      "expected": "12.345,50\u00a0\u20ac",
+      "why": "...and here is where the same locale DOES group."
+    },
+    {
+      "locale": "pl-PL",
+      "currency": "EUR",
+      "amount": 1234.5,
+      "expected": "1234,50\u00a0\u20ac",
+      "why": "Same rule, and the code fallback renders as bare 'EUR' rather than a symbol."
+    },
+    {
+      "locale": "hu-HU",
+      "currency": "EUR",
+      "amount": 1234.5,
+      "expected": "1234,50\u00a0EUR",
+      "why": "Same rule, U+00A0 grouping."
+    },
+    {
+      "locale": "nb-NO",
+      "currency": "USD",
+      "amount": 1234.5,
+      "expected": "1\u00a0234,50\u00a0USD",
+      "why": "Same rule. Also the locale CLDR itself resolves to the language without a region."
+    },
+    {
+      "locale": "sv-SE",
+      "currency": "USD",
+      "amount": 1234.5,
+      "expected": "1\u00a0234,50\u00a0US$",
+      "why": "Same rule, with the disambiguated 'US$'."
+    },
+    {
+      "locale": "uk-UA",
+      "currency": "USD",
+      "amount": 1234.5,
+      "expected": "1\u00a0234,50\u00a0USD",
+      "why": "Same rule, Cyrillic locale, Latin currency code."
+    },
+    {
+      "locale": "ru-RU",
+      "currency": "USD",
+      "amount": 1234.5,
+      "expected": "1\u00a0234,50\u00a0$",
+      "why": "Same rule, U+00A0 grouping."
+    },
+    {
+      "locale": "ro-RO",
+      "currency": "EUR",
+      "amount": 1234.5,
+      "expected": "1.234,50\u00a0EUR",
+      "why": "Groups at four digits — the opposite outcome from it-IT, in the same currency."
+    },
+    {
+      "locale": "fi-FI",
+      "currency": "EUR",
+      "amount": -1.5,
+      "expected": "\u22121,50\u00a0\u20ac",
+      "why": "Finnish uses U+2212 MINUS SIGN, not the ASCII hyphen. Two documents that disagree here are visibly different."
+    },
+    {
+      "locale": "ko-KR",
+      "currency": "KRW",
+      "amount": 1234.5,
+      "expected": "\u20a91,235",
+      "why": "Zero-decimal currency, half rounds up."
+    },
+    {
+      "locale": "ja-JP",
+      "currency": "JPY",
+      "amount": 12000.5,
+      "expected": "\uffe512,001",
+      "why": "ja-JP renders the yen as the FULL-WIDTH U+FFE5, where en-US renders U+00A5."
+    },
+    {
+      "locale": "ja-JP",
+      "currency": "JPY",
+      "amount": 0.4,
+      "expected": "< \uffe51",
+      "why": "The tiny floor follows that same full-width glyph: '< \\uFFE51'."
+    },
+    {
+      "locale": "ja-JP",
+      "currency": "USD",
+      "amount": 1234.5,
+      "expected": "$1,234.50",
+      "why": "A foreign currency in Japanese number shapes."
+    },
+    {
+      "locale": "zh-CN",
+      "currency": "CNY",
+      "amount": 1234.5,
+      "expected": "\u00a51,234.50",
+      "why": "Chinese yuan: U+00A5 half-width here, and two decimals."
+    },
+    {
+      "locale": "th-TH",
+      "currency": "THB",
+      "amount": 1234.5,
+      "expected": "\u0e3f1,234.50",
+      "why": "Thai baht."
+    },
+    {
+      "locale": "hi-IN",
+      "currency": "INR",
+      "amount": 1234.5,
+      "expected": "\u20b91,234.50",
+      "why": "The rupee symbol, and Latin (not Devanagari) digits."
+    },
+    {
+      "locale": "en-IN",
+      "currency": "INR",
+      "amount": 1234567.891,
+      "expected": "\u20b912,34,567.89",
+      "why": "LAKH GROUPING: the rightmost group is 3 and every group above it is 2 — '12,34,567'. A formatter that only knows groups of three cannot produce this."
+    },
+    {
+      "locale": "bn-BD",
+      "currency": "USD",
+      "amount": 1234567.891,
+      "expected": "\u09e7\u09e8,\u09e9\u09ea,\u09eb\u09ec\u09ed.\u09ee\u09ef\u00a0US$",
+      "why": "Bengali digit shapes AND lakh grouping: '\\u09E7\\u09E8,\\u09E9\\u09EA,\\u09EB\\u09EC\\u09ED.\\u09EE\\u09EF US$'. Reachable only because the digit glyphs are data."
+    },
+    {
+      "locale": "ar-SA",
+      "currency": "USD",
+      "amount": 1234.5,
+      "expected": "\u200f\u0661\u066c\u0662\u0663\u0664\u066b\u0665\u0660\u00a0US$",
+      "why": "Arabic-Indic digits, Arabic decimal and group separators, a leading RTL mark (U+200F), and the trailing 'US$'. Every one of those is in the table; none of it is arithmetic."
+    },
+    {
+      "locale": "ar-SA",
+      "currency": "USD",
+      "amount": -1.5,
+      "expected": "\u061c-\u200f\u0661\u066b\u0665\u0660\u00a0US$",
+      "why": "The negative form adds U+061C and U+200E around the minus. A hand-written formatter would have to know ICU's bidi insertion rules to reproduce this."
+    },
+    {
+      "locale": "pt-BR",
+      "currency": "BRL",
+      "amount": 1234.5,
+      "expected": "R$\u00a01.234,50",
+      "why": "'R$ 1.234,50' — symbol with a space inside it, '.' grouping, ',' decimals."
+    },
+    {
+      "locale": "en-US",
+      "currency": "BHD",
+      "amount": 1234.5,
+      "expected": "BHD\u00a01,234.500",
+      "why": "THREE fraction digits. A formatter hard-coded to cents cannot print this currency at all."
+    },
+    {
+      "locale": "en-US",
+      "currency": "ZZZ",
+      "amount": 1234.5,
+      "expected": "ZZZ\u00a01,234.50",
+      "why": "A well-formed code ICU has no data for: it renders the bare code with the locale's currency spacing, which is the fallback every unlisted currency takes."
+    },
+    {
+      "locale": "en-US",
+      "currency": "JPY",
+      "amount": 0.4,
+      "expected": "< \u00a51",
+      "why": "The tiny floor is the currency's minor unit, not a literal cent: '< \\u00A51'."
+    }
+  ]
+}

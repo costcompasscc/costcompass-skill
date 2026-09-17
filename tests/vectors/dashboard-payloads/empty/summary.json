@@ -1,12 +1,12 @@
 {
-  "burn_rate_7day": 0.0,
+  "burn_rate_7day": {},
   "days_remaining": 15,
   "enabled_provider_count": 0,
-  "forecast_usd": 0.0,
+  "forecast": {},
   "incomplete_card_count": 0,
-  "mtd_usd": 0.0,
+  "mtd": {},
   "newest_fetched_at": null,
   "per_provider_burn": {},
-  "previous_month_usd": 0.0,
+  "previous_month": {},
   "stale_cards": []
 }

@@ -41,11 +41,24 @@ def _render(scenario: str) -> str:
     directory = _CORPUS / scenario
     summary = json.loads((directory / "summary.json").read_text())
     breakdown = json.loads((directory / "breakdown.json").read_text())
-    request = json.loads((directory / "scenario.json").read_text())["request"]
+    scenario = json.loads((directory / "scenario.json").read_text())
+    request = scenario.get("request", {})
     summary_scope = request.get("summary.json", {})
-    lines = _numbered("mtd", render.format_amount(summary))
+    # The scenario authors the reader preferences the capture seeded; a
+    # single-currency scenario leaves them unset, so the renderer's defaults
+    # (en-US, no primary) apply and the golden stays byte-identical.
+    locale = scenario.get("display_locale") or render.DEFAULT_LOCALE
+    primary = scenario.get("primary_currency")
+    lines = _numbered(
+        "mtd", render.format_amount(summary, locale=locale, primary_currency=primary)
+    )
     _append_note(lines, "mtd-staleness", summary)
-    lines.extend(_numbered("breakdown", render.format_breakdown(breakdown)))
+    lines.extend(
+        _numbered(
+            "breakdown",
+            render.format_breakdown(breakdown, locale=locale, primary_currency=primary),
+        )
+    )
     provider_id = summary_scope.get("provider")
     if provider_id:
         card = next(card for card in breakdown if card["provider_id"] == provider_id)
@@ -58,7 +71,13 @@ def _render(scenario: str) -> str:
         lines.extend(
             _numbered(
                 "details-00",
-                render.format_details(card["display_name"], summary, models),
+                render.format_details(
+                    card["display_name"],
+                    summary,
+                    models,
+                    locale=locale,
+                    primary_currency=primary,
+                ),
             )
         )
         _append_note(lines, "details-00-staleness", summary)
@@ -70,7 +89,10 @@ def _render(scenario: str) -> str:
             _numbered(
                 f"subscription-{index:02d}",
                 render.format_subscription(
-                    card["display_name"], card.get("cost_usd") or 0.0
+                    card["display_name"],
+                    card.get("totals") or {},
+                    locale=locale,
+                    primary_currency=primary,
                 ),
             )
         )

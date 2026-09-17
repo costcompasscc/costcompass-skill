@@ -6,11 +6,17 @@ command layer is responsible for printing them.
 
 from __future__ import annotations
 
+import math
 import re
-from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
-from .api import required_money
+from . import currency_totals as ct
+from .api import ApiError, required_totals
+from .currency_format import format_money
+
+#: The rendering a reader gets before they have chosen a locale (design §6.2).
+#: The page, the PDF and the macOS app all resolve the same way.
+DEFAULT_LOCALE = "en-US"
 
 # C0 + C1 control characters (includes ESC 0x1b, which starts every ANSI/CSI/OSC
 # sequence). Field values rendered here are single-line, so we drop control
@@ -45,48 +51,41 @@ _UNKNOWN_SURFACE_ORDER = 999
 _REFRESH_COMMAND = "costcompass mtd refresh --vault"
 
 
-#: Quantum for every money figure the CLI prints.
-_CENT = Decimal("0.01")
+def money(value: float, currency: str = "USD", locale: str = DEFAULT_LOCALE) -> str:
+    """Money for display, spelled the way the web page and the PDF spell it.
 
-
-def money(value: float) -> str:
-    """Money for display, rounded to the nearest cent.
-
-    One of four implementations of a single rule — the web page
+    One of four renderers of a single rule — the web page
     (``frontend/src/lib/format.ts``), the server-rendered PDF
-    (``backend/app/services/report_service.py``), the macOS menu bar
-    (``Formatters.formatUSDDisplay``) and this. A user running
-    ``costcompass mtd`` beside the dashboard is looking at two renderings of
-    one number, so any disagreement reads as a bug in the data.
+    (``backend/app/core/currency_format.py``), the macOS menu bar
+    (``Formatters.moneyDisplay``) and this. A user running ``costcompass mtd``
+    beside the dashboard is looking at two renderings of one number, so any
+    disagreement reads as a bug in the data.
 
-    Two details are load-bearing for that agreement, both about matching
-    JavaScript's ``toLocaleString`` on the web side:
+    This is not a second implementation of the rule: it reads the same probed
+    ICU table the PDF reads (``currency_format_data.json``, copied from
+    ``backend/app/core/``) and is asserted against the same shared corpus
+    (``test-vectors/currency-format/cases.json``). Rounding, the currency's own
+    minor unit, digit shapes, separators, the currency space and the sign
+    placement all arrive as data, so there is nothing here to drift.
 
-    * ``Decimal(str(value))`` rather than a bare ``f"{value:,.2f}"``. The
-      format spec rounds half-to-EVEN on the binary double, so it renders
-      ``$1.00`` for ``1.005`` and ``$2.67`` for ``2.675`` where every other
-      surface says ``$1.01`` and ``$2.68``.
-    * ``ROUND_HALF_UP``, ties away from zero, which is the rule the other
-      three use.
-
-    A positive amount that rounds to nothing reads "< $0.01" rather than
-    "$0.00" — printing a charge as no charge is the reading this exists to
-    prevent, and the sub-cent per-model rows on a metered card are exactly
-    where it bites. A negative that rounds to nothing drops its sign, and the
-    sign otherwise sits outside the "$", so a credit reads "-$1.50" and never
-    the "$-0.00" the old format spec could produce.
-
-    ASSUMPTION: the shared case table lives in
-    ``frontend/src/lib/money-display-cases.ts`` in the main repo, and
-    ``test_render.py`` carries a copy by hand. This CLI ships from its own
-    repo on its own cadence, so nothing mechanically pins the two — if that
-    table moves and this copy is not carried over, the suites stay green and
-    the CLI silently drifts from the dashboard again.
+    A positive amount that rounds to nothing reads ``< <minor unit>`` rather
+    than ``$0.00`` — printing a charge as no charge is the reading this exists
+    to prevent, and the sub-cent per-model rows on a metered card are exactly
+    where it bites. The default locale keeps the historical USD/en-US output
+    byte-identical.
     """
-    magnitude = Decimal(str(value)).copy_abs().quantize(_CENT, rounding=ROUND_HALF_UP)
-    if magnitude == 0:
-        return "< $0.01" if value > 0 else "$0.00"
-    return f"{'-' if value < 0 else ''}${magnitude:,.2f}"
+    return format_money(value, currency, locale)
+
+
+def locale_of(preferences: dict[str, Any] | None) -> str:
+    """The reader's display locale, or the product default when unset — the
+    same resolution the web page, the PDF and the macOS app use."""
+    return (preferences or {}).get("display_locale") or DEFAULT_LOCALE
+
+
+def primary_currency_of(preferences: dict[str, Any] | None) -> str | None:
+    """The currency that leads (§4.2), or None when the user never set one."""
+    return (preferences or {}).get("primary_currency")
 
 
 def incomplete_window_note(summary: dict[str, Any]) -> str | None:
@@ -169,55 +168,129 @@ def _stale_card_label(card: dict[str, Any]) -> str:
     return f"{name} ({', '.join(facts)})"
 
 
-def format_amount(summary: dict[str, Any]) -> str:
+def format_amount(
+    summary: dict[str, Any],
+    *,
+    locale: str = DEFAULT_LOCALE,
+    primary_currency: str | None = None,
+) -> str:
     """The headline 'big number' for the portfolio or one service.
+
+    One line per currency, in §4.2 order, and never a figure summed across them
+    (design §4.4). A single-currency account reads exactly as it always did.
 
     Carries the incomplete-window caveat on a second line when there is one:
     this is the whole output of ``costcompass mtd``, so a figure printed bare
     reads as settled even when the server knows part of the month is missing.
     """
-    amount = money(required_money(summary, "mtd_usd"))
+    totals = required_totals(summary, "mtd")
+    codes = ct.ordered(totals, primary_currency) or [primary_currency or "USD"]
+    body = "\n".join(money(ct.amount(totals, code), code, locale) for code in codes)
     note = incomplete_window_note(summary)
-    return f"{amount}\n{note}" if note else amount
+    return f"{body}\n{note}" if note else body
 
 
-def format_subscription(display_name: str, cost: float) -> str:
+def format_subscription(
+    display_name: str,
+    totals: dict[str, Any],
+    *,
+    locale: str = DEFAULT_LOCALE,
+    primary_currency: str | None = None,
+) -> str:
     """A standalone subscription card has no metered usage — just a flat fee,
-    so there is no burn/forecast/per-model detail to show."""
+    so there is no burn/forecast/per-model detail to show. One line per
+    currency; a plan billed in LKR must not print as a dollar figure."""
+    codes = ct.ordered(totals, primary_currency) or [primary_currency or "USD"]
+    figures = " + ".join(money(ct.amount(totals, code), code, locale) for code in codes)
     return (
-        f"{safe_text(display_name)} — {money(cost)} month-to-date\n"
+        f"{safe_text(display_name)} — {figures} month-to-date\n"
         f"  (subscription — flat fee, no metered usage)"
     )
 
 
-def format_breakdown(cards: list[dict[str, Any]]) -> str:
+def format_breakdown(
+    cards: list[dict[str, Any]],
+    *,
+    locale: str = DEFAULT_LOCALE,
+    primary_currency: str | None = None,
+) -> str:
     """Every card (metered providers AND standalone subscriptions) ranked by
-    cost, with a reconciling total. ``cards`` is the /dashboard/breakdown
-    payload, where a folded plan fee already sits inside its provider's
-    ``cost_usd`` and a standalone subscription is its own row."""
-    rows = sorted(cards, key=lambda c: -(required_money(c, "cost_usd")))
-    total = sum(required_money(c, "cost_usd") for c in cards)
+    cost, with a reconciling total.
+
+    ``cards`` is the /dashboard/breakdown payload, whose rows carry ``totals`` —
+    a map, because one card can hold money in two currencies (§7.2). One block
+    per currency in §4.2 order: the amounts in a block are all one denominator,
+    so the column and its total are the same-currency sums they always were. A
+    single-currency account gets one unlabelled block, byte-identical to the
+    output before this change.
+    """
+    currencies = ct.ordered_union(
+        [c.get("totals") for c in cards], primary_currency
+    ) or [primary_currency or "USD"]
+    blocks = [
+        _breakdown_block(cards, currency, locale, labelled=len(currencies) > 1)
+        for currency in currencies
+    ]
+    return "\n\n".join(blocks)
+
+
+def _breakdown_block(
+    cards: list[dict[str, Any]], currency: str, locale: str, *, labelled: bool
+) -> str:
+    # Validate every card's map even for a currency it has none of: a malformed
+    # row is an incompatible response, not a card worth $0.
+    totals = [required_totals(c, "totals") for c in cards]
+    rows = sorted(zip(cards, totals), key=lambda pair: -ct.amount(pair[1], currency))
+    total = sum(ct.amount(t, currency) for t in totals)
     width = max(
-        [len(money(required_money(c, "cost_usd"))) for c in rows] + [len(money(total))]
+        [len(money(ct.amount(t, currency), currency, locale)) for _, t in rows]
+        + [len(money(total, currency, locale))]
+        or [0]
     )
     lines: list[str] = []
-    for c in rows:
-        amount = money(required_money(c, "cost_usd"))
+    if labelled:
+        lines.append(f"{currency}:")
+    for c, card_totals in rows:
+        amount = money(ct.amount(card_totals, currency), currency, locale)
         name = safe_text(c.get("display_name") or c.get("provider_id") or "")
         kind = c.get("kind") or "provider"
         tag = "" if kind == "provider" else f"  ({safe_text(kind)})"
         lines.append(f"  {amount:>{width}}  {name}{tag}")
     lines.append(f"  {'-' * width}")
-    lines.append(f"  {money(total):>{width}}  Total")
+    lines.append(f"  {money(total, currency, locale):>{width}}  Total")
     return "\n".join(lines)
 
 
-def _model_value(row: dict[str, Any]) -> str:
-    """Cost for a model row, or its display_value when unpriced."""
-    cost = required_money(row, "cost_usd")
+def _row_amount(row: dict[str, Any]) -> float:
+    """A row's amount for SORTING only; validation happens in `_model_value`."""
+    value = row.get("amount")
+    return float(value) if type(value) in (int, float) else 0.0
+
+
+def _model_value(row: dict[str, Any], locale: str, currency: str) -> str:
+    """Cost for a model row in *currency*, or its display_value when unpriced.
+
+    A row that names another currency is a rendering bug, not a zero: the caller
+    groups by denomination, so ``_model_lines`` only ever passes matching rows.
+    """
+    if (row.get("currency") or "") != currency:
+        raise ValueError(
+            f"model row for {row.get('currency')!r} rendered as {currency!r}"
+        )
+    value = row.get("amount")
+    try:
+        valid = type(value) in (int, float) and math.isfinite(value)
+    except OverflowError:
+        valid = False
+    if not valid:
+        raise ApiError(
+            "Incompatible API response: required money field 'amount' is missing "
+            "or invalid. Update the CostCompass CLI/plugin and try again."
+        )
+    cost = float(value)
     if cost == 0 and row.get("display_value"):
         return safe_text(row["display_value"])
-    return money(cost)
+    return money(cost, currency, locale)
 
 
 def _surface_sort_key(surface: str | None) -> int:
@@ -229,34 +302,94 @@ def format_details(
     display_name: str,
     summary: dict[str, Any],
     models: list[dict[str, Any]],
+    *,
+    locale: str = DEFAULT_LOCALE,
+    primary_currency: str | None = None,
 ) -> str:
-    """Headline metrics + per-model breakout grouped by surface."""
-    lines: list[str] = [
-        f"{safe_text(display_name)} — {money(required_money(summary, 'mtd_usd'))} month-to-date",
-        f"  7-day daily burn : {money(required_money(summary, 'burn_rate_7day'))}",
-        f"  forecast (next)  : {money(required_money(summary, 'forecast_usd'))}",
+    """Headline metrics + per-model breakout grouped by currency, then surface.
+
+    Every money metric is a map in the new contract, so a card holding money in
+    two currencies reports both rather than folding one into the other (§4.4).
+    Rows carry their own denomination and are grouped by it (§7.3): the amounts
+    inside a group share a currency, so ordering and summing them is meaningful.
+    """
+    validated = {
+        field: required_totals(summary, field)
+        for field in ("mtd", "burn_rate_7day", "forecast", "previous_month")
+    }
+    summary_currencies = ct.ordered_union(
+        [
+            validated["mtd"],
+            validated["burn_rate_7day"],
+            validated["forecast"],
+            validated["previous_month"],
+        ],
+        primary_currency,
+    ) or [primary_currency or "USD"]
+
+    lines: list[str] = []
+    for index, currency in enumerate(summary_currencies):
+        if index:
+            lines.append("")
+        lines.extend(
+            _details_headline(display_name, summary, validated, currency, locale)
+        )
+
+    model_currencies = ct.ordered_union(
+        [{(row.get("currency") or "USD"): row.get("amount")} for row in models],
+        primary_currency,
+    )
+    if not models:
+        lines.append("")
+        lines.append("  (no per-model breakdown)")
+        return "\n".join(lines)
+
+    for index, currency in enumerate(model_currencies):
+        if index or summary_currencies:
+            lines.append("")
+        if len(model_currencies) > 1:
+            lines.append(f"  {currency}:")
+        lines.extend(_model_lines(models, currency, locale, indent_extra="  "))
+    return "\n".join(lines)
+
+
+def _details_headline(
+    display_name: str,
+    summary: dict[str, Any],
+    metrics: dict[str, dict[str, float]],
+    currency: str,
+    locale: str,
+) -> list[str]:
+    lines = [
+        f"{safe_text(display_name)} — "
+        f"{money(ct.amount(metrics['mtd'], currency), currency, locale)} month-to-date",
+        f"  7-day daily burn : "
+        f"{money(ct.amount(metrics['burn_rate_7day'], currency), currency, locale)}",
+        f"  forecast (next)  : "
+        f"{money(ct.amount(metrics['forecast'], currency), currency, locale)}",
         f"  days remaining   : {summary.get('days_remaining', 0)}",
-        f"  previous month   : {money(required_money(summary, 'previous_month_usd'))}",
+        f"  previous month   : "
+        f"{money(ct.amount(metrics['previous_month'], currency), currency, locale)}",
     ]
     if summary.get("newest_fetched_at"):
         lines.append(f"  data as of       : {safe_text(summary['newest_fetched_at'])}")
     note = incomplete_window_note(summary)
     if note:
         lines.append(f"  {note}")
+    return lines
 
-    if not models:
-        lines.append("")
-        lines.append("  (no per-model breakdown)")
-        return "\n".join(lines)
 
+def _model_lines(
+    models: list[dict[str, Any]], currency: str, locale: str, *, indent_extra: str = ""
+) -> list[str]:
     ordered = sorted(
-        models,
+        (row for row in models if (row.get("currency") or "USD") == currency),
         key=lambda r: (
             _surface_sort_key(r.get("surface")),
-            -(required_money(r, "cost_usd")),
+            -_row_amount(r),
         ),
     )
-    lines.append("")
+    lines: list[str] = []
     current_surface: str | None = "__unset__"
     for row in ordered:
         surface = row.get("surface")
@@ -264,8 +397,8 @@ def format_details(
             current_surface = surface
             if surface:
                 label = _SURFACES.get(surface, (surface, 0))[0]
-                lines.append(f"  {safe_text(label)}:")
-        indent = "    " if current_surface else "  "
+                lines.append(f"{indent_extra}{safe_text(label)}:")
+        indent = f"  {indent_extra}" if current_surface else indent_extra
         name = safe_text(row.get("display_name") or row.get("model", ""))
-        lines.append(f"{indent}{name:<32} {_model_value(row)}")
-    return "\n".join(lines)
+        lines.append(f"{indent}{name:<32} {_model_value(row, locale, currency)}")
+    return lines

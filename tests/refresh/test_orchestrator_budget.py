@@ -153,7 +153,7 @@ class _Harness:
                 200, json={"run_id": "run-1", "status": "success", "providers": []}
             )
         if path.endswith("/dashboard/summary"):
-            return httpx.Response(200, json={"mtd_usd": 4.0})
+            return httpx.Response(200, json={"mtd": {"USD": 4.0}})
         return httpx.Response(404, json={"error": path})
 
     def _broker(self, _request: httpx.Request) -> httpx.Response:

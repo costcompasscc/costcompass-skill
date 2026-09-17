@@ -38,23 +38,37 @@ class ApiError(Exception):
         self.status = status
 
 
-def required_money(payload: dict[str, Any], field: str) -> float:
-    """Read a required JSON money scalar without inventing zero spend.
+def required_totals(payload: dict[str, Any], field: str) -> dict[str, float]:
+    """Read a required per-currency money map without inventing zero spend.
 
-    Field names are caller-owned constants; never include response values in
-    the error, since an incompatible response may contain sensitive material.
+    The replacement for the scalar ``required_money`` the currency migration
+    shipped as a stopgap: the wire no longer carries a bare ``mtd_usd``, and a
+    reader that quietly treated a missing map as ``0`` would print a settled
+    ``$0.00`` for an account it simply could not understand. Field names are
+    caller-owned constants; never include response values in the error, since an
+    incompatible response may contain sensitive material.
     """
     value = payload.get(field)
-    try:
-        valid = type(value) in (int, float) and math.isfinite(value)
-    except OverflowError:
-        valid = False
-    if not valid:
-        raise ApiError(
-            f"Incompatible API response: required money field '{field}' is missing "
-            "or invalid. Update the CostCompass CLI/plugin and try again."
-        )
-    return value
+    if not isinstance(value, dict):
+        raise ApiError(_missing_money_message(field))
+    totals: dict[str, float] = {}
+    for code, amount in value.items():
+        if not isinstance(code, str) or type(amount) not in (int, float):
+            raise ApiError(_missing_money_message(field))
+        try:
+            if not math.isfinite(amount):
+                raise ApiError(_missing_money_message(field))
+        except OverflowError as exc:
+            raise ApiError(_missing_money_message(field)) from exc
+        totals[code] = float(amount)
+    return totals
+
+
+def _missing_money_message(field: str) -> str:
+    return (
+        f"Incompatible API response: required money map '{field}' is missing "
+        "or invalid. Update the CostCompass CLI/plugin and try again."
+    )
 
 
 def is_ambiguous_failure(exc: ApiError) -> bool:
@@ -197,6 +211,12 @@ class Client:
 
     def me(self) -> dict[str, Any]:
         return self._json("GET", "/me")
+
+    def preferences(self) -> dict[str, Any]:
+        """``GET /account/preferences`` — the reader's ``display_locale`` and
+        ``primary_currency`` (design §6.2 / §4.2). Fetched per command so a
+        change made on another surface is picked up here."""
+        return self._json("GET", "/account/preferences")
 
     def summary(self, provider: str | None = None) -> dict[str, Any]:
         params = {"provider": provider} if provider else None

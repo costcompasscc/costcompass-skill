@@ -75,7 +75,7 @@ SUBS = [
         "id": "uuid-higgs",
         "display_name": "Higgsfield",
         "kind": "subscription",
-        "cost_usd": 14.5,
+        "totals": {"USD": 14.5},
     },
 ]
 
@@ -88,7 +88,7 @@ def test_match_resolves_subscription_by_display_name():
     card = services.match("higgsfield", SUBS)
     assert card is not None
     assert card["id"] == "uuid-higgs"
-    assert card["cost_usd"] == 14.5
+    assert card["totals"] == {"USD": 14.5}
 
 
 def test_match_ambiguous_subscriptions_raise():

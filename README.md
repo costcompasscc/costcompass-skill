@@ -172,11 +172,11 @@ Add `--json` to any command for machine-readable output (it implies
 `--quiet`, and errors still go to stderr with a non-zero exit):
 
 ```bash
-costcompass mtd --json                   # the full summary object
+costcompass mtd --json                   # the full summary object (money is per-currency)
 costcompass mtd claude --json            # one service's summary
 costcompass mtd claude details --json    # { provider_id, display_name, summary, models }
-costcompass mtd breakdown --json         # { total_usd, cards: [ every provider + subscription ] }
-costcompass mtd refresh --vault --json   # { mtd_usd, providers: [ per-card outcomes ] }
+costcompass mtd breakdown --json         # { totals, cards: [ every provider + subscription ] }
+costcompass mtd refresh --vault --json   # { mtd, providers: [ per-card outcomes ] }
 ```
 
 ### Refresh

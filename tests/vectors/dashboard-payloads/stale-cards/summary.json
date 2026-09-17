@@ -1,15 +1,23 @@
 {
-  "burn_rate_7day": 0.3214,
+  "burn_rate_7day": {
+    "USD": 0.3214
+  },
   "days_remaining": 15,
   "enabled_provider_count": 3,
-  "forecast_usd": 9.9643,
+  "forecast": {
+    "USD": 9.9643
+  },
   "incomplete_card_count": 0,
-  "mtd_usd": 8.75,
+  "mtd": {
+    "USD": 8.75
+  },
   "newest_fetched_at": "2026-04-15T11:00:00Z",
   "per_provider_burn": {
-    "mock": 0.3214
+    "mock": {
+      "USD": 0.3214
+    }
   },
-  "previous_month_usd": 0.0,
+  "previous_month": {},
   "stale_cards": [
     {
       "blocked": false,

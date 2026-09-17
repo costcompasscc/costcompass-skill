@@ -80,8 +80,8 @@ def test_breakdown_column_widens_for_a_sub_cent_row():
     than letting the token overflow its field and skew the table."""
     out = render.format_breakdown(
         [
-            {"display_name": "Anthropic", "cost_usd": 12.5},
-            {"display_name": "Atlas Cloud", "cost_usd": 0.004},
+            {"display_name": "Anthropic", "totals": {"USD": 12.5}},
+            {"display_name": "Atlas Cloud", "totals": {"USD": 0.004}},
         ]
     )
     assert "< $0.01" in out
@@ -98,28 +98,30 @@ def test_breakdown_column_widens_for_a_sub_cent_row():
 
 
 def test_format_amount():
-    assert render.format_amount({"mtd_usd": 42.5}) == "$42.50"
+    assert render.format_amount({"mtd": {"USD": 42.5}}) == "$42.50"
 
 
 def test_format_details_headline_and_models():
     summary = {
-        "mtd_usd": 100.0,
-        "burn_rate_7day": 3.0,
-        "forecast_usd": 90.0,
+        "mtd": {"USD": 100.0},
+        "burn_rate_7day": {"USD": 3.0},
+        "forecast": {"USD": 90.0},
         "days_remaining": 5,
-        "previous_month_usd": 80.0,
+        "previous_month": {"USD": 80.0},
     }
     models = [
         {
             "model": "m1",
             "display_name": "Sonnet",
-            "cost_usd": 70.0,
+            "amount": 70.0,
+            "currency": "USD",
             "surface": "ai_usage",
         },
         {
             "model": "m2",
             "display_name": "Opus",
-            "cost_usd": 30.0,
+            "amount": 30.0,
+            "currency": "USD",
             "surface": "ai_usage",
         },
     ]
@@ -133,16 +135,17 @@ def test_format_details_headline_and_models():
 
 def test_format_details_display_value_for_unpriced():
     summary = {
-        "mtd_usd": 0.0,
-        "burn_rate_7day": 0.0,
-        "forecast_usd": 0.0,
-        "previous_month_usd": 0.0,
+        "mtd": {"USD": 0.0},
+        "burn_rate_7day": {"USD": 0.0},
+        "forecast": {"USD": 0.0},
+        "previous_month": {"USD": 0.0},
     }
     models = [
         {
             "model": "q",
             "display_name": "Free tier",
-            "cost_usd": 0.0,
+            "amount": 0.0,
+            "currency": "USD",
             "display_value": "4.2K / 10K",
         },
     ]
@@ -153,22 +156,24 @@ def test_format_details_display_value_for_unpriced():
 
 def test_format_details_surface_ordering():
     summary = {
-        "mtd_usd": 10.0,
-        "burn_rate_7day": 0.0,
-        "forecast_usd": 0.0,
-        "previous_month_usd": 0.0,
+        "mtd": {"USD": 10.0},
+        "burn_rate_7day": {"USD": 0.0},
+        "forecast": {"USD": 0.0},
+        "previous_month": {"USD": 0.0},
     }
     models = [
         {
             "model": "c",
             "display_name": "Compute",
-            "cost_usd": 5.0,
+            "amount": 5.0,
+            "currency": "USD",
             "surface": "cloud_infra",
         },
         {
             "model": "a",
             "display_name": "Tokens",
-            "cost_usd": 5.0,
+            "amount": 5.0,
+            "currency": "USD",
             "surface": "ai_usage",
         },
     ]
@@ -177,7 +182,7 @@ def test_format_details_surface_ordering():
 
 
 def test_format_subscription():
-    out = render.format_subscription("Higgsfield", 14.5)
+    out = render.format_subscription("Higgsfield", {"USD": 14.5})
     assert "Higgsfield — $14.50 month-to-date" in out
     assert "subscription" in out
 
@@ -188,19 +193,19 @@ def test_format_breakdown_ranks_and_totals():
             "provider_id": "anthropic",
             "display_name": "Anthropic",
             "kind": "provider",
-            "cost_usd": 96.71,
+            "totals": {"USD": 96.71},
         },
         {
             "provider_id": "u1",
             "display_name": "Higgsfield",
             "kind": "subscription",
-            "cost_usd": 14.5,
+            "totals": {"USD": 14.5},
         },
         {
             "provider_id": "openai",
             "display_name": "OpenAI",
             "kind": "provider",
-            "cost_usd": 19.39,
+            "totals": {"USD": 19.39},
         },
     ]
     out = render.format_breakdown(cards)
@@ -230,7 +235,7 @@ def test_format_breakdown_neutralizes_malicious_card_name():
             "provider_id": "x",
             "display_name": "\x1b]0;pwned\x07Acme",
             "kind": "provider",
-            "cost_usd": 1.0,
+            "totals": {"USD": 1.0},
         }
     ]
     out = render.format_breakdown(cards)
@@ -241,7 +246,7 @@ def test_format_breakdown_neutralizes_malicious_card_name():
 def test_mtd_total_discloses_an_incomplete_window():
     """A bare figure reads as settled. When the server knows part of the month
     never arrived, the number is a floor and must say so."""
-    out = render.format_amount({"mtd_usd": 12.5, "incomplete_card_count": 1})
+    out = render.format_amount({"mtd": {"USD": 12.5}, "incomplete_card_count": 1})
     assert out.startswith("$12.50\n")
     assert "hasn't finished loading" in out
     assert "may be low" in out
@@ -249,10 +254,11 @@ def test_mtd_total_discloses_an_incomplete_window():
 
 def test_mtd_total_stays_bare_when_every_window_is_whole():
     assert (
-        render.format_amount({"mtd_usd": 12.5, "incomplete_card_count": 0}) == "$12.50"
+        render.format_amount({"mtd": {"USD": 12.5}, "incomplete_card_count": 0})
+        == "$12.50"
     )
     # An older server omits the field entirely — no caveat, unchanged output.
-    assert render.format_amount({"mtd_usd": 12.5}) == "$12.50"
+    assert render.format_amount({"mtd": {"USD": 12.5}}) == "$12.50"
 
 
 def test_incomplete_note_agrees_in_number():
@@ -386,4 +392,89 @@ def test_staleness_is_silent_with_no_enabled_cards():
 
 def test_staleness_is_silent_against_an_older_server():
     """A server predating the field omits it — unchanged, silent output."""
-    assert render.staleness_note({"mtd_usd": 12.5}) is None
+    assert render.staleness_note({"mtd": {"USD": 12.5}}) is None
+
+
+# ---------- Per-currency rendering ----------
+#
+# The wire carries money as a map keyed by ISO code, so a card can hold two
+# denominations in one month. Two rules matter here and nowhere else: the order
+# is §4.2 (primary first, then alphabetical), and nothing is ever summed across
+# unlike currencies (design §4.4).
+
+
+def test_format_amount_prints_one_line_per_currency_in_section_4_2_order():
+    summary = {"mtd": {"USD": 5.32, "LKR": 2900.0}}
+    # primary_currency governs, NOT the larger amount.
+    out = render.format_amount(summary, primary_currency="USD")
+    assert out.splitlines()[:2] == ["$5.32", "LKR\u00a02,900.00"]
+    # No primary set -> alphabetical.
+    assert render.format_amount(summary).splitlines()[0] == "LKR\u00a02,900.00"
+
+
+def test_format_amount_never_prints_a_cross_currency_total():
+    summary = {"mtd": {"USD": 5.32, "LKR": 2900.0}}
+    out = render.format_amount(summary, primary_currency="USD")
+    assert "2,905.32" not in out
+    assert "$5.32" in out and "LKR\u00a02,900.00" in out
+
+
+def test_format_amount_honours_display_locale():
+    out = render.format_amount({"mtd": {"EUR": 1234.5}}, locale="de-DE")
+    assert out == "1.234,50\u00a0€"
+
+
+def test_format_breakdown_groups_by_currency_with_its_own_total():
+    cards = [
+        {"provider_id": "lkr", "display_name": "LKR card", "totals": {"LKR": 2900.0}},
+        {"provider_id": "usd", "display_name": "USD card", "totals": {"USD": 5.32}},
+    ]
+    out = render.format_breakdown(cards, primary_currency="USD")
+    # Two labelled blocks, in §4.2 order, each total in its own denomination.
+    assert out.index("USD:") < out.index("LKR:")
+    usd_block = out.split("LKR:")[0]
+    lkr_block = out.split("LKR:")[1]
+    assert "Total" in usd_block and "$5.32" in usd_block
+    assert "2,900.00" in lkr_block
+    # The two totals are never added.
+    assert "2,905.32" not in out
+
+
+def test_format_breakdown_ranks_cards_by_the_primary_currency():
+    cards = [
+        {"provider_id": "usd-big", "display_name": "USD big", "totals": {"USD": 500.0}},
+        {
+            "provider_id": "lkr-small",
+            "display_name": "LKR small",
+            "totals": {"LKR": 10.0},
+        },
+    ]
+    out = render.format_breakdown(cards, primary_currency="LKR")
+    # The LKR card leads because it holds the primary currency, whatever its size.
+    assert out.index("LKR small") < out.index("USD big")
+
+
+def test_format_details_reports_each_currency_separately():
+    summary = {
+        "mtd": {"USD": 5.0, "LKR": 2900.0},
+        "burn_rate_7day": {"USD": 1.0, "LKR": 100.0},
+        "forecast": {"USD": 9.0, "LKR": 3000.0},
+        "previous_month": {"USD": 4.0, "LKR": 2000.0},
+        "days_remaining": 5,
+    }
+    models = [
+        {"model": "a", "display_name": "A", "amount": 1.0, "currency": "USD"},
+        {"model": "b", "display_name": "B", "amount": 100.0, "currency": "LKR"},
+    ]
+    out = render.format_details("Example", summary, models, primary_currency="LKR")
+    assert out.count("month-to-date") == 2
+    assert "LKR\u00a02,900.00 month-to-date" in out
+    assert "$5.00 month-to-date" in out
+    # Models are grouped by denomination, not added.
+    assert out.index("  LKR:") < out.index("  USD:")
+
+
+def test_format_subscription_keeps_a_foreign_fee_in_its_own_currency():
+    out = render.format_subscription("Design tool", {"LKR": 2900.0})
+    assert "LKR\u00a02,900.00 month-to-date" in out
+    assert "$" not in out

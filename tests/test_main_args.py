@@ -176,8 +176,11 @@ def test_total_happy_path(clean_env, monkeypatch):
         def __exit__(self, *exc):
             return None
 
+        def preferences(self):
+            return {}
+
         def summary(self, provider=None):
-            return {"mtd_usd": 7.0}
+            return {"mtd": {"USD": 7.0}}
 
     monkeypatch.setattr(main.api, "Client", FakeClient)
     result = runner.invoke(main.app, ["mtd"])
@@ -198,14 +201,17 @@ def test_total_json(clean_env, monkeypatch):
         def __exit__(self, *exc):
             return None
 
+        def preferences(self):
+            return {}
+
         def summary(self, provider=None):
-            return {"mtd_usd": 7.0, "forecast_usd": 9.0}
+            return {"mtd": {"USD": 7.0}, "forecast": {"USD": 9.0}}
 
     monkeypatch.setattr(main.api, "Client", FakeClient)
     result = runner.invoke(main.app, ["mtd", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
-    assert data == {"mtd_usd": 7.0, "forecast_usd": 9.0}
+    assert data == {"mtd": {"USD": 7.0}, "forecast": {"USD": 9.0}}
 
 
 def test_details_json(clean_env, monkeypatch):
@@ -221,12 +227,15 @@ def test_details_json(clean_env, monkeypatch):
         def __exit__(self, *exc):
             return None
 
+        def preferences(self):
+            return {}
+
         def summary(self, provider=None):
             return {
-                "mtd_usd": 5.0,
-                "burn_rate_7day": 0.0,
-                "forecast_usd": 0.0,
-                "previous_month_usd": 0.0,
+                "mtd": {"USD": 5.0},
+                "burn_rate_7day": {"USD": 0.0},
+                "forecast": {"USD": 0.0},
+                "previous_month": {"USD": 0.0},
             }
 
         def providers(self):
@@ -243,7 +252,9 @@ def test_details_json(clean_env, monkeypatch):
             return [
                 {
                     "provider_id": "anthropic",
-                    "model_breakdown": [{"model": "x", "cost_usd": 1.0}],
+                    "model_breakdown": [
+                        {"model": "x", "currency": "USD", "amount": 1.0}
+                    ],
                 }
             ]
 
@@ -253,7 +264,7 @@ def test_details_json(clean_env, monkeypatch):
     data = json.loads(result.output)
     assert data["provider_id"] == "anthropic"
     assert data["display_name"] == "Anthropic (Claude)"
-    assert data["summary"]["mtd_usd"] == 5.0
+    assert data["summary"]["mtd"] == {"USD": 5.0}
     assert data["models"][0]["model"] == "x"
 
 
@@ -268,6 +279,9 @@ class _FakeCardsClient:
 
     def __exit__(self, *exc):
         return None
+
+    def preferences(self):
+        return {}
 
     def summary(self, provider=None):
         # The breakdown payload has nowhere to carry scope-level facts, so the
@@ -291,13 +305,13 @@ class _FakeCardsClient:
                 "provider_id": "anthropic",
                 "display_name": "Anthropic",
                 "kind": "provider",
-                "cost_usd": 96.71,
+                "totals": {"USD": 96.71},
             },
             {
                 "provider_id": "u1",
                 "display_name": "Higgsfield",
                 "kind": "subscription",
-                "cost_usd": 14.5,
+                "totals": {"USD": 14.5},
             },
         ]
 
@@ -318,7 +332,7 @@ def test_breakdown_json(clean_env, monkeypatch):
     result = runner.invoke(main.app, ["mtd", "breakdown", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
-    assert data["total_usd"] == round(96.71 + 14.5, 4)
+    assert data["totals"] == {"USD": round(96.71 + 14.5, 4)}
     assert data["cards"][0]["display_name"] == "Anthropic"  # ranked by cost
     assert any(c["kind"] == "subscription" for c in data["cards"])
 
@@ -339,7 +353,7 @@ def test_subscription_json(clean_env, monkeypatch):
     data = json.loads(result.output)
     assert data["kind"] == "subscription"
     assert data["display_name"] == "Higgsfield"
-    assert data["cost_usd"] == 14.5
+    assert data["totals"] == {"USD": 14.5}
 
 
 def test_unknown_service_lists_subscriptions_too(clean_env, monkeypatch):
@@ -361,7 +375,7 @@ def test_refresh_json_forces_quiet_and_emits_payload(clean_env, monkeypatch):
             outcomes=[
                 orchestrator.EntryOutcome("anthropic", "", "success", events_ingested=3)
             ],
-            mtd_usd=131.01,
+            mtd={"USD": 131.01},
         )
 
     monkeypatch.setattr(main.orchestrator, "run", fake_run)
@@ -369,7 +383,7 @@ def test_refresh_json_forces_quiet_and_emits_payload(clean_env, monkeypatch):
     assert result.exit_code == 0
     assert seen["progress"] is False  # --json implies --quiet → no ticker
     data = json.loads(result.output)
-    assert data["mtd_usd"] == 131.01
+    assert data["mtd"] == {"USD": 131.01}
     assert data["providers"][0] == {
         "provider_id": "anthropic",
         "instance_key": "",
@@ -616,12 +630,15 @@ class _StaleClient:
     def __exit__(self, *exc):
         return None
 
+    def preferences(self):
+        return {}
+
     def summary(self, provider=None):
         return {
-            "mtd_usd": 7.0,
-            "burn_rate_7day": 0.0,
-            "forecast_usd": 0.0,
-            "previous_month_usd": 0.0,
+            "mtd": {"USD": 7.0},
+            "burn_rate_7day": {"USD": 0.0},
+            "forecast": {"USD": 0.0},
+            "previous_month": {"USD": 0.0},
             "enabled_provider_count": 1,
             "newest_fetched_at": _stale_iso(12),
             # The server decides which cards are behind and by how much; this
@@ -653,7 +670,7 @@ class _StaleClient:
                 "provider_id": "anthropic",
                 "display_name": "Anthropic",
                 "kind": "provider",
-                "cost_usd": 7.0,
+                "totals": {"USD": 7.0},
             }
         ]
 

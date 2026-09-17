@@ -1,15 +1,25 @@
 {
-  "burn_rate_7day": 2.1357,
+  "burn_rate_7day": {
+    "USD": 2.1357
+  },
   "days_remaining": 15,
   "enabled_provider_count": 3,
-  "forecast_usd": 66.2071,
+  "forecast": {
+    "USD": 66.2071
+  },
   "incomplete_card_count": 1,
-  "mtd_usd": 14.95,
+  "mtd": {
+    "USD": 14.95
+  },
   "newest_fetched_at": "2026-04-15T11:30:00Z",
   "per_provider_burn": {
-    "anthropic": 1.6786,
-    "openai": 0.4571
+    "anthropic": {
+      "USD": 1.6786
+    },
+    "openai": {
+      "USD": 0.4571
+    }
   },
-  "previous_month_usd": 0.0,
+  "previous_month": {},
   "stale_cards": []
 }

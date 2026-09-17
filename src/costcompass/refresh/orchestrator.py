@@ -31,7 +31,8 @@ from typing import Any, Self, TypeVar
 
 from .. import api, config, services
 from .. import vault as vault_mod
-from ..render import money, safe_text
+from .. import render
+from ..render import safe_text
 from . import oauth, program, signers
 from .broker import (
     BrokerClient,
@@ -348,10 +349,12 @@ class EntryOutcome:
 class RefreshResult:
     """Outcome of a whole refresh run: the per-entry results plus the closing
     month-to-date (scoped to the refreshed service, else the whole account).
-    ``mtd_usd`` is returned so a JSON caller need not re-fetch the summary."""
+    ``mtd`` is returned so a JSON caller need not re-fetch the summary. It is a
+    per-currency map: a service holding money in two denominations reports both,
+    and nothing is folded across them (design §4.4)."""
 
     outcomes: list[EntryOutcome]
-    mtd_usd: float
+    mtd: dict[str, float]
 
 
 def _resolve_credential(
@@ -1039,9 +1042,22 @@ def _run(
         # Scope the closing MTD to the refreshed service, else the whole-account
         # total — so ``mtd google refresh`` reports google's number, not the sum.
         summary = client.summary(provider=scoped_provider)
-        mtd_usd = float(api.required_money(summary, "mtd_usd"))
-        echo(f"\nMonth-to-date: {money(mtd_usd)}")
-        return RefreshResult(outcomes=outcomes, mtd_usd=mtd_usd)
+        mtd = api.required_totals(summary, "mtd")
+        # Preferences are display policy: a failed read must not fail a run that
+        # already succeeded, so it degrades to the product defaults.
+        try:
+            preferences = client.preferences()
+        except api.ApiError:
+            preferences = {}
+        echo(
+            "\nMonth-to-date: "
+            + render.format_amount(
+                {"mtd": mtd},
+                locale=render.locale_of(preferences),
+                primary_currency=render.primary_currency_of(preferences),
+            )
+        )
+        return RefreshResult(outcomes=outcomes, mtd=mtd)
     finally:
         if owns_client:
             client.close()

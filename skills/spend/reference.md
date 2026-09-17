@@ -151,8 +151,8 @@ breakdown request is still one round-trip.
 
 For "where's my money / which costs the most / what's in my total", use
 `mtd breakdown` — it's the only view that includes **standalone
-subscriptions** (e.g. a Higgsfield plan), so its `total_usd` reconciles to the
-`mtd` headline. A `<service>` that isn't a metered provider falls back to a
+subscriptions** (e.g. a Higgsfield plan), so its `totals` reconcile to the
+`mtd` headline, currency by currency. A `<service>` that isn't a metered provider falls back to a
 subscription card and reports just its flat amount (no burn/forecast/models).
 
 **Never install the CLI from the current workspace.** It is already bundled
@@ -172,10 +172,15 @@ the valid names — pass them back to the user; don't invent a mapping.
 
 ## What the JSON fields mean (so you summarize correctly)
 
-- `mtd_usd` — the headline month-to-date figure.
+- Money fields are **maps keyed by ISO 4217 code**, one entry per currency the
+  account holds money in (`{"USD": 5.32, "LKR": 2900.0}`). Report each currency's
+  figure separately and never add them: `LKR 2,900` cannot be ranked against
+  `$5.32`. A single-currency account has exactly one entry.
+- `mtd` — the headline month-to-date figure, per currency.
 - `burn_rate_7day` — total daily burn over the last 7 days, **including
-  subscriptions** (e.g. a Claude Max plan fee dominates it).
-- `forecast_usd` — projected end-of-month total.
+  subscriptions** (e.g. a Claude Max plan fee dominates it), per currency.
+- `forecast` — projected end-of-month total, per currency.
+- `previous_month` — last calendar month's spend, per currency.
 - `per_provider_burn` (total view only) — per-provider **metered-usage** daily
   burn, excluding subscriptions; a UI min-runway helper. Don't present it as a
   breakdown of `burn_rate_7day` — they intentionally differ.
@@ -188,8 +193,12 @@ the valid names — pass them back to the user; don't invent a mapping.
   at `costcompass mtd refresh --vault`. The CLI already prints this on stderr in
   human mode; the fields are here so you can say the same thing in your own
   words rather than repeat its line.
-- `details` adds `models[]` (`display_name`, `cost_usd`, `surface`); a row with
-  `cost_usd == 0` and a `display_value` is a usage-count line, not a charge.
+- `details` adds `models[]` (`display_name`, `amount`, `currency`, `surface`); a
+  row with `amount == 0` and a `display_value` is a usage-count line, not a
+  charge.
+- `display_locale` (from `GET /account/preferences`) decides how a figure is
+  spelled and `primary_currency` which currency leads (§4.2). The CLI resolves
+  both itself; do not invent a symbol table.
 
 **Subscriptions and metered usage belong together — report the all-in card
 total by default.** A card's cost (e.g. Anthropic $96.71) already includes its

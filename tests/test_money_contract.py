@@ -1,8 +1,16 @@
-"""Malformed/renamed money must never become a successful zero-spend result."""
+"""Malformed/renamed money must never become a successful zero-spend result.
+
+The currency migration removed the scalar money fields (``mtd_usd`` and friends)
+for a per-currency map. The fail-loud contract survives the rename: a missing or
+malformed map is an incompatible response, and printing a settled ``$0.00`` for
+an account the CLI could not understand is the regression this suite exists to
+prevent.
+"""
 
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import httpx
 import pytest
@@ -12,45 +20,64 @@ from costcompass import api, config, main, render, vault
 from costcompass.refresh import orchestrator
 
 SUMMARY = {
-    "mtd_usd": 12.0,
-    "burn_rate_7day": 1.0,
-    "forecast_usd": 20.0,
-    "previous_month_usd": 10.0,
+    "mtd": {"USD": 12.0},
+    "burn_rate_7day": {"USD": 1.0},
+    "forecast": {"USD": 20.0},
+    "previous_month": {"USD": 10.0},
 }
 MISSING = object()
+
+_INVALID_MAPS: list[Any] = [
+    MISSING,
+    None,
+    False,
+    "secret-value",
+    [],
+    10**400,
+    -(10**400),
+    float("nan"),
+    float("inf"),
+]
+
+
+@pytest.mark.parametrize("value", _INVALID_MAPS)
+def test_required_totals_rejects_invalid_without_echoing_values(value):
+    payload = {} if value is MISSING else {"mtd": value}
+    with pytest.raises(api.ApiError, match="required money map 'mtd'") as exc:
+        api.required_totals(payload, "mtd")
+    assert "secret-value" not in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "inner", ["secret-value", None, float("nan"), float("inf"), 10**400]
+)
+def test_required_totals_rejects_an_invalid_entry(inner):
+    with pytest.raises(api.ApiError, match="required money map 'mtd'") as exc:
+        api.required_totals({"mtd": {"USD": inner}}, "mtd")
+    assert "secret-value" not in str(exc.value)
 
 
 @pytest.mark.parametrize(
     "value",
     [
-        MISSING,
-        None,
-        False,
-        "secret-value",
-        {},
-        [],
-        10**400,
-        -(10**400),
-        float("nan"),
-        float("inf"),
+        {"USD": 0},
+        {"USD": 0.0},
+        {"USD": -1.25},
+        {"USD": 0.0001},
+        {"USD": 42.5},
+        {"USD": 42.5, "LKR": 2900.0},
     ],
 )
-def test_required_money_rejects_invalid_without_echoing_values(value):
-    payload = {} if value is MISSING else {"cost_usd": value}
-    with pytest.raises(api.ApiError, match="required money field 'cost_usd'") as exc:
-        api.required_money(payload, "cost_usd")
-    assert "secret-value" not in str(exc.value)
-
-
-@pytest.mark.parametrize("value", [0, 0.0, -1.25, 0.0001, 42.5])
-def test_required_money_preserves_valid_numbers(value):
-    assert api.required_money({"cost_usd": value}, "cost_usd") == value
+def test_required_totals_preserves_valid_maps(value):
+    assert api.required_totals({"mtd": value}, "mtd") == {
+        code: float(amount) for code, amount in value.items()
+    }
 
 
 @pytest.mark.parametrize("field", SUMMARY)
 @pytest.mark.parametrize("value", [MISSING, None])
-def test_details_requires_each_money_metric(field, value):
-    summary = dict(SUMMARY)
+def test_details_requires_each_money_map(field, value):
+    summary = {key: dict(totals) for key, totals in SUMMARY.items()}
     if value is MISSING:
         del summary[field]
     else:
@@ -59,20 +86,21 @@ def test_details_requires_each_money_metric(field, value):
         render.format_details("Example", summary, [])
 
 
-def test_unpriced_display_does_not_hide_missing_cost():
-    with pytest.raises(api.ApiError, match="cost_usd"):
+def test_unpriced_display_does_not_hide_missing_amount():
+    with pytest.raises(api.ApiError, match="amount"):
         render.format_details(
-            "Example", SUMMARY, [{"model": "free", "display_value": "4K tokens"}]
+            "Example",
+            SUMMARY,
+            [{"model": "free", "currency": "USD", "display_value": "4K tokens"}],
         )
 
 
 def test_empty_breakdown_is_legitimate_zero():
-    assert main._breakdown_payload([]) == {"total_usd": 0, "cards": []}
+    assert main._breakdown_payload([]) == {"totals": {}, "cards": []}
     assert "$0.00" in render.format_breakdown([])
 
 
 @pytest.mark.parametrize("as_json", [False, True])
-@pytest.mark.parametrize("value", [MISSING, None, 10**400])
 @pytest.mark.parametrize(
     "surface",
     [
@@ -86,38 +114,33 @@ def test_empty_breakdown_is_legitimate_zero():
         "refresh",
     ],
 )
-def test_commands_fail_without_success_output(monkeypatch, as_json, value, surface):
-    summary = dict(SUMMARY)
-    cards = [
+def test_commands_fail_without_success_output(monkeypatch, as_json, surface):
+    summary = {key: dict(totals) for key, totals in SUMMARY.items()}
+    cards: list[dict[str, Any]] = [
         {
             "provider_id": "example",
             "display_name": "Example",
-            "cost_usd": 12.0,
-            "model_breakdown": [{"model": "model", "cost_usd": 12.0}],
+            "totals": {"USD": 12.0},
+            "model_breakdown": [{"model": "model", "currency": "USD", "amount": 12.0}],
         },
         {
             "provider_id": "plan",
             "display_name": "Plan",
             "kind": "subscription",
-            "cost_usd": 5.0,
+            "totals": {"USD": 5.0},
         },
     ]
-    field = "mtd_usd"
-    target = summary
+    field = "mtd"
+    target: dict[str, Any] = summary
     if surface == "details":
-        field = "forecast_usd"
+        field = "forecast"
     elif surface == "model":
-        target, field = cards[0]["model_breakdown"][0], "cost_usd"
+        target, field = cards[0]["model_breakdown"][0], "amount"
     elif surface == "breakdown":
-        target, field = cards[0], "cost_usd"
+        target, field = cards[0], "totals"
     elif surface.startswith("subscription"):
-        target, field = cards[1], "cost_usd"
-    if value is MISSING:
-        del target[field]
-        # Simulate the forthcoming API rename, not just an empty response.
-        target[field.removesuffix("_usd")] = {"USD": 42.5}
-    else:
-        target[field] = value
+        target, field = cards[1], "totals"
+    del target[field]
 
     requests = _install_api(monkeypatch, summary, cards)
     args = {
@@ -154,6 +177,8 @@ def _install_api(monkeypatch, summary, cards):
             body = cards
         elif path.endswith("/providers"):
             body = [{"id": "example", "display_name": "Example", "enabled": True}]
+        elif path.endswith("/account/preferences"):
+            body = {"display_locale": None, "primary_currency": None}
         elif path.endswith("/fetch-runs"):
             body = {"run_id": "run-1", "fetches": []}
         elif path.endswith("/finalize"):
@@ -187,9 +212,11 @@ def _install_api(monkeypatch, summary, cards):
 
 @pytest.mark.parametrize("value", [0, 12])
 def test_refresh_json_preserves_float_output(monkeypatch, value):
-    _install_api(monkeypatch, {"mtd_usd": value}, [])
+    _install_api(monkeypatch, {"mtd": {"USD": value}}, [])
     result = CliRunner().invoke(main.app, ["mtd", "refresh", "--vault", "--json"])
     assert result.exit_code == 0, result.output
     assert result.stderr == ""
-    assert json.loads(result.stdout) == {"mtd_usd": float(value), "providers": []}
-    assert f'"mtd_usd": {value}.0' in result.stdout
+    assert json.loads(result.stdout) == {
+        "mtd": {"USD": float(value)},
+        "providers": [],
+    }
