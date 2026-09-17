@@ -180,9 +180,12 @@ def test_commands_fail_without_success_output(monkeypatch, as_json, surface):
         assert any(path.endswith("/finalize") for path in requests)
 
 
-def test_commands_fail_when_a_model_row_names_no_currency(monkeypatch):
+@pytest.mark.parametrize("as_json", [False, True])
+def test_commands_fail_when_a_model_row_names_no_currency(monkeypatch, as_json):
     """The details command must print the incompatible-response message and exit
-    1 when a model row names no currency — never a Python traceback."""
+    1 when a model row names no currency — never a Python traceback. ``--json``
+    forces quiet output, so a failure must reach stderr with no success object
+    on stdout."""
     summary = {key: dict(totals) for key, totals in SUMMARY.items()}
     cards: list[dict[str, Any]] = [
         {
@@ -193,7 +196,9 @@ def test_commands_fail_when_a_model_row_names_no_currency(monkeypatch):
         }
     ]
     _install_api(monkeypatch, summary, cards)
-    result = CliRunner().invoke(main.app, ["mtd", "example", "details"])
+    result = CliRunner().invoke(
+        main.app, ["mtd", "example", "details", *(["--json"] if as_json else [])]
+    )
     assert result.exit_code == 1, result.output
     assert result.stdout == ""
     assert "currency" in result.stderr
