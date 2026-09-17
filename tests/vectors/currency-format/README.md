@@ -74,6 +74,16 @@ and it runs inside the frontend suite, which `run-tests.sh` already executes. It
 is deliberately *not* in `make drift-check`: that group is documented as
 offline and stdlib-only, and this one needs Node and an ICU.
 
+A **re-probe must also be re-vendored to the CLI.** `client/plugin` reads its
+own copy of this table and ships on its own cadence, so
+`scripts/sync-test-vectors.sh` vendors the file into
+`client/plugin/src/costcompass/currency_format_data.json` byte-for-byte, and
+`make drift-check-vectors` fails on a single byte of drift. That guard is
+offline and stdlib-only (bash + `diff`), which is why it belongs in
+`drift-check` where the ICU guard above does not. Without it a re-probe that
+moved no case in `cases.json` would reach the PDF and the page while the CLI
+quietly kept the old ICU's spelling.
+
 **A diff here is a finding, not a rebaseline.** It means the ICU moved. The
 questions to answer before re-capturing are: which locales and currencies moved,
 does the page really say something different now, and is that a change we want
@@ -122,11 +132,15 @@ fixture.
   money that large, but the parity claim stops there and a reader comparing the
   two surfaces should know where.
 - **The CLI is wired; the macOS suite still hand-copies.** The CLI
-  (`client/plugin`, the sibling repo) reads this same probed table
-  (`costcompass/currency_format_data.json`, copied from
-  `backend/app/core/`) and asserts every case here
+  (`client/plugin`, the sibling repo) reads a byte-identical copy of this probed
+  table (`costcompass/currency_format_data.json`) and asserts every case here
   (`tests/test_currency_format.py`) against its vendored copy of
-  `cases.json`, so it cannot drift. The macOS suite
+  `cases.json`. Both are vendored by `scripts/sync-test-vectors.sh` — the table
+  as a file corpus, the corpus as a directory — so `make drift-check-vectors`
+  fails on a byte of drift in either. The two guards answer different
+  questions: `cases.json` is the contract on the OUTPUT, and byte-identity is
+  what stops a re-probe the cases do not cover from reaching the PDF and the
+  page while the CLI keeps the old ICU's spelling. The macOS suite
   (`client/macos/…/FormattersTests.swift`) still hand-copies the USD/en-US
   values this corpus inherited from the deleted `money-display-cases.ts`: it
   formats through Foundation's ICU rather than this table, and Foundation's

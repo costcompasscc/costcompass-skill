@@ -4,5 +4,13 @@
 # either side fails that drift check, so these stay exactly as generated.
 tests/vectors/
 
+# The probed ICU money table, vendored byte-for-byte from
+# backend/app/core/currency_format_data.json by the monorepo's
+# scripts/sync-test-vectors.sh. Same byte-for-byte rule as tests/vectors/ above,
+# which does not cover this path because the table lives in the package rather
+# than in the test corpora. Prettier formatting it would fail the monorepo's
+# `make drift-check-vectors`; re-vendor it, never format it.
+src/costcompass/currency_format_data.json
+
 # Not prettier's language — ruff owns Python (see `make fmt-python`).
 *.py
