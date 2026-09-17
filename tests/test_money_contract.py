@@ -95,6 +95,21 @@ def test_unpriced_display_does_not_hide_missing_amount():
         )
 
 
+@pytest.mark.parametrize("value", [MISSING, None, "", 5, [], {}])
+def test_details_requires_a_currency_on_every_model_row(value):
+    """One model row is one currency (design §5), so a row that names none is an
+    incompatible response — the same user-facing failure as a missing amount,
+    not a bare ValueError out of the renderer."""
+    row: dict[str, Any] = {"model": "model", "currency": "USD", "amount": 1.0}
+    if value is MISSING:
+        del row["currency"]
+    else:
+        row["currency"] = value
+    with pytest.raises(api.ApiError, match="currency") as exc:
+        render.format_details("Example", SUMMARY, [row])
+    assert "Update the CostCompass CLI/plugin" in str(exc.value)
+
+
 def test_empty_breakdown_is_legitimate_zero():
     assert main._breakdown_payload([]) == {"totals": {}, "cards": []}
     assert "$0.00" in render.format_breakdown([])
@@ -163,6 +178,27 @@ def test_commands_fail_without_success_output(monkeypatch, as_json, surface):
     assert "Traceback" not in result.output
     if surface == "refresh":
         assert any(path.endswith("/finalize") for path in requests)
+
+
+def test_commands_fail_when_a_model_row_names_no_currency(monkeypatch):
+    """The details command must print the incompatible-response message and exit
+    1 when a model row names no currency — never a Python traceback."""
+    summary = {key: dict(totals) for key, totals in SUMMARY.items()}
+    cards: list[dict[str, Any]] = [
+        {
+            "provider_id": "example",
+            "display_name": "Example",
+            "totals": {"USD": 12.0},
+            "model_breakdown": [{"model": "model", "amount": 12.0}],
+        }
+    ]
+    _install_api(monkeypatch, summary, cards)
+    result = CliRunner().invoke(main.app, ["mtd", "example", "details"])
+    assert result.exit_code == 1, result.output
+    assert result.stdout == ""
+    assert "currency" in result.stderr
+    assert "Update the CostCompass CLI/plugin" in result.stderr
+    assert "Traceback" not in result.output
 
 
 def _install_api(monkeypatch, summary, cards):

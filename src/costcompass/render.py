@@ -279,13 +279,37 @@ def _row_amount(row: dict[str, Any]) -> float:
     return float(value) if type(value) in (int, float) else 0.0
 
 
+def _missing_model_field(field: str) -> ApiError:
+    return ApiError(
+        f"Incompatible API response: required money field '{field}' is missing "
+        "or invalid. Update the CostCompass CLI/plugin and try again."
+    )
+
+
+def _model_currency(row: dict[str, Any]) -> str:
+    """A model row's denomination, required — one row is one currency (§5).
+
+    ``ModelBreakdownOut`` is ``amount`` + ``currency``, so a row that names no
+    currency is an incompatible response rather than a dollar figure. It fails
+    the way a missing ``amount`` does: an ``ApiError`` the command layer prints.
+    Defaulting to USD instead would relabel foreign spend as dollars, which is
+    the failure this migration exists to prevent — and it is what the grouping
+    and filtering below used to do before this guard rejected the row.
+    """
+    currency = row.get("currency")
+    if not isinstance(currency, str) or not currency:
+        raise _missing_model_field("currency")
+    return currency
+
+
 def _model_value(row: dict[str, Any], locale: str, currency: str) -> str:
     """Cost for a model row in *currency*, or its display_value when unpriced.
 
     A row that names another currency is a rendering bug, not a zero: the caller
-    groups by denomination, so ``_model_lines`` only ever passes matching rows.
+    groups through ``_model_currency``, so ``_model_lines`` only ever passes
+    matching rows.
     """
-    if (row.get("currency") or "") != currency:
+    if row.get("currency") != currency:
         raise ValueError(
             f"model row for {row.get('currency')!r} rendered as {currency!r}"
         )
@@ -295,10 +319,7 @@ def _model_value(row: dict[str, Any], locale: str, currency: str) -> str:
     except OverflowError:
         valid = False
     if not valid:
-        raise ApiError(
-            "Incompatible API response: required money field 'amount' is missing "
-            "or invalid. Update the CostCompass CLI/plugin and try again."
-        )
+        raise _missing_model_field("amount")
     cost = float(value)
     if cost == 0 and row.get("display_value"):
         return safe_text(row["display_value"])
@@ -348,7 +369,7 @@ def format_details(
         )
 
     model_currencies = ct.ordered_union(
-        [{(row.get("currency") or "USD"): row.get("amount")} for row in models],
+        [{_model_currency(row): row.get("amount")} for row in models],
         primary_currency,
     )
     if not models:
@@ -395,7 +416,7 @@ def _model_lines(
     models: list[dict[str, Any]], currency: str, locale: str, *, indent_extra: str = ""
 ) -> list[str]:
     ordered = sorted(
-        (row for row in models if (row.get("currency") or "USD") == currency),
+        (row for row in models if _model_currency(row) == currency),
         key=lambda r: (
             _surface_sort_key(r.get("surface")),
             -_row_amount(r),
