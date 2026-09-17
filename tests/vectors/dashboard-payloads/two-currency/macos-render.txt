@@ -1,0 +1,2 @@
+menubar/mtd	$67
+menubar/mtd-and-balance	$67

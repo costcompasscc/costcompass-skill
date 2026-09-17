@@ -1,0 +1,13 @@
+mtd/00	$67.74
+mtd/01	LKR 16,300.00
+breakdown/00	USD:
+breakdown/01	  $67.74  Anthropic (Claude)
+breakdown/02	   $0.00  OpenAI
+breakdown/03	  ------
+breakdown/04	  $67.74  Total
+breakdown/05	
+breakdown/06	LKR:
+breakdown/07	  LKR 12,000.00  Anthropic (Claude)
+breakdown/08	   LKR 4,300.00  OpenAI
+breakdown/09	  -------------
+breakdown/10	  LKR 16,300.00  Total

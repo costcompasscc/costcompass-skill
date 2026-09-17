@@ -2,11 +2,15 @@
 
 The "before" picture of a **single-currency** account, captured ahead of the
 multi-currency change so that change can be reviewed against something rather
-than against memory.
+than against memory — plus, now that the per-currency shape has landed, **one
+two-currency scenario** that pins the new contract (design §7.0, §7.2).
 
 Read [`doc/design/multi-currency.md`](../../doc/design/multi-currency.md) §1 and
 §1.1 first. §1 promises that a user with one currency sees today's UI unchanged.
-This corpus is what that promise is checked against.
+This corpus is what that promise is checked against. Every scenario except
+`two-currency` is a single-currency account and is part of that evidence;
+`two-currency` is the one scenario that exists to be different, so it carries no
+§1 claim — do not cite its render files as a single-currency user's screen.
 
 ## What this proves, and what it does not
 
@@ -24,13 +28,6 @@ says that must not happen.
 
 Deliberately outside the corpus:
 
-- **Multi-currency payloads.** §1 is about the one-currency case, and this
-  corpus is the evidence for it. The per-currency report shape now exists
-  (design §7.0) and both client renderers decode it, so a two-currency scenario
-  is the remaining work — but `coverage.json` requires every scenario to carry
-  every surface, and the scenario (its seeded amounts, its `primary_currency` and
-  its five captured surfaces) is authored rather than derived. Tracked as its
-  own bead; the corpus stays single-currency until that lands.
 - **Balances.** Sequenced for §11 step 5.
 - **CLI JSON and refresh-flow output.** This corpus covers the CLI's text
   renderer only: `format_amount`, `format_breakdown`, `format_details`,
@@ -93,6 +90,7 @@ The two are never edited by the same act.
 | `stale-cards` | `stale_cards` populated, `newest_fetched_at` old | §1.1 |
 | `incomplete-cards` | `incomplete_card_count` non-zero | §1.1 |
 | `provider-filtered` | `?provider=…` — a different code path from the portfolio view | §1.1 |
+| `two-currency` | Two currencies, one card holding both, `primary_currency` not the larger spend | §7.0, §7.2 |
 
 ## Request scope is per surface, not per scenario
 
@@ -125,6 +123,29 @@ could pass every state §1.1 names.
 `stale-cards` and `incomplete-cards` are separate because `stale_cards` and
 `incomplete_card_count` are computed independently and rendered independently; a
 combined scenario can hide a regression in either.
+
+`two-currency` is the one scenario that is not a single-currency account. It
+exists because the per-currency report shape (design §7.0) and the per-currency
+card figures (§7.2) are contracts a USD-only corpus cannot pin: every
+single-currency scenario is satisfied by a renderer that ignores currency
+altogether. Its three discriminating choices are authored in its
+`scenario.json` and restated here so they are not mistaken for arbitrary seeds:
+
+- **USD is `primary_currency` while LKR is the larger spend.** §4.2's served
+  order is therefore `["USD", "LKR"]`, which is neither alphabetical nor
+  size-ranked (`LKR` leads under both). A regression to either ordering is a
+  visible diff rather than a plausible-looking one.
+- **Anthropic holds money in both currencies** and OpenAI holds LKR only. The
+  first exercises a card's two per-currency header lines (§7.2); the second
+  gives the LKR ring two services, so its percentages are a real 73.6/26.4 split
+  instead of the degenerate 100% a one-service ring yields under any denominator.
+- **No balance is seeded**, so `balance_total` is `null` throughout — balances
+  are sequenced for §11 step 5 and this scenario does not imply otherwise.
+
+What a golden can assert about it that a byte-equality check cannot — and what
+`backend/tests/unit/test_two_currency_golden.py` therefore does — is the order
+above, each ring's percentages being shares of *that ring*, and the absence of a
+figure summed across the two.
 
 `coverage.json` lists these, and the surfaces each must carry. A scenario
 directory that goes missing fails a test rather than reading as "we did not need

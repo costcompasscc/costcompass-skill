@@ -1,0 +1,67 @@
+[
+  {
+    "breakdown_label": "Breakdown",
+    "display_name": "Anthropic (Claude)",
+    "instance_key": "",
+    "kind": "provider",
+    "model_breakdown": [
+      {
+        "amount": 12000.0,
+        "currency": "LKR",
+        "display_name": "Claude Opus 4",
+        "display_value": null,
+        "group": null,
+        "model": "claude-opus-4",
+        "surface": "ai_usage",
+        "value_tooltip": null
+      },
+      {
+        "amount": 40.0,
+        "currency": "USD",
+        "display_name": "Claude Opus 4",
+        "display_value": null,
+        "group": null,
+        "model": "claude-opus-4",
+        "surface": "ai_usage",
+        "value_tooltip": null
+      },
+      {
+        "amount": 27.74,
+        "currency": "USD",
+        "display_name": "Claude Sonnet 4",
+        "display_value": null,
+        "group": null,
+        "model": "claude-sonnet-4",
+        "surface": "ai_usage",
+        "value_tooltip": null
+      }
+    ],
+    "provider_id": "anthropic",
+    "totals": {
+      "LKR": 12000.0,
+      "USD": 67.74
+    }
+  },
+  {
+    "breakdown_label": "Breakdown",
+    "display_name": "OpenAI",
+    "instance_key": "",
+    "kind": "provider",
+    "model_breakdown": [
+      {
+        "amount": 4300.0,
+        "currency": "LKR",
+        "display_name": "GPT-4o",
+        "display_value": null,
+        "group": null,
+        "model": "gpt-4o",
+        "surface": null,
+        "value_tooltip": null
+      }
+    ],
+    "provider_id": "openai",
+    "totals": {
+      "LKR": 4300.0
+    }
+  }
+]

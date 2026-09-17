@@ -1,0 +1,23 @@
+dashboard-hero/00	$67.74LKR 16,300.00
+dashboard-hero/01	$122.85
+dashboard-hero/02	$122.85
+dashboard-hero/03	—
+dashboard-hero/04	—
+dashboard-hero/05	$3.96 / day
+dashboard-hero/06	$3.96 / day
+dashboard-hero/07	—
+dashboard-hero/08	—
+dashboard-hero/09	—
+dashboard-hero/10	—
+dashboard-breakdown/00	$67.74
+dashboard-breakdown/01	LKR 12,000.00
+dashboard-breakdown/02	LKR 4,300.00
+report/00	$67.74
+report/01	$67.74100%
+report/02	LKR 16,300.00
+report/03	LKR 12,000.0074%
+report/04	LKR 4,300.0026%
+report/05	$67.74
+report/06	LKR 12,000.00
+report/07	LKR 4,300.00
+report/08	Generated 15 April 2026, 12:00 UTC

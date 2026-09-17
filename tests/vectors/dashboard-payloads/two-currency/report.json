@@ -1,0 +1,151 @@
+{
+  "balance_caveat": null,
+  "balance_stale_count": 0,
+  "balance_unavailable_count": 0,
+  "currencies": [
+    {
+      "balance_total": null,
+      "currency": "USD",
+      "slices": [
+        {
+          "amount": 67.74,
+          "balance_display": null,
+          "balance_status": null,
+          "color_index": 0,
+          "display_name": "Anthropic (Claude)",
+          "fraction": 1.0,
+          "key": "provider:anthropic:",
+          "member_count": 1,
+          "percent_label": "100%",
+          "start_fraction": 0.0
+        }
+      ],
+      "total": 67.74
+    },
+    {
+      "balance_total": null,
+      "currency": "LKR",
+      "slices": [
+        {
+          "amount": 12000.0,
+          "balance_display": null,
+          "balance_status": null,
+          "color_index": 0,
+          "display_name": "Anthropic (Claude)",
+          "fraction": 0.7361963190184049,
+          "key": "provider:anthropic:",
+          "member_count": 1,
+          "percent_label": "74%",
+          "start_fraction": 0.0
+        },
+        {
+          "amount": 4300.0,
+          "balance_display": null,
+          "balance_status": null,
+          "color_index": 1,
+          "display_name": "OpenAI",
+          "fraction": 0.26380368098159507,
+          "key": "provider:openai:",
+          "member_count": 1,
+          "percent_label": "26%",
+          "start_fraction": 0.7361963190184049
+        }
+      ],
+      "total": 16300.0
+    }
+  ],
+  "generated_at_utc": "2026-04-15T12:00:00Z",
+  "no_activity": [],
+  "primary_currency": "USD",
+  "services": [
+    {
+      "attention": null,
+      "balance_display": null,
+      "balance_status": null,
+      "breakdown_label": "Breakdown",
+      "currencies": [
+        {
+          "amount": 67.74,
+          "color_index": 0,
+          "currency": "USD",
+          "fraction": 1.0,
+          "percent_label": "100%"
+        },
+        {
+          "amount": 12000.0,
+          "color_index": 0,
+          "currency": "LKR",
+          "fraction": 0.7361963190184049,
+          "percent_label": "74%"
+        }
+      ],
+      "display_name": "Anthropic (Claude)",
+      "free_lines": [],
+      "key": "provider:anthropic:",
+      "model_breakdown": [
+        {
+          "amount": 40.0,
+          "currency": "USD",
+          "display_name": "Claude Opus 4",
+          "display_value": null,
+          "group": null,
+          "model": "claude-opus-4",
+          "surface": "ai_usage",
+          "value_tooltip": null
+        },
+        {
+          "amount": 27.74,
+          "currency": "USD",
+          "display_name": "Claude Sonnet 4",
+          "display_value": null,
+          "group": null,
+          "model": "claude-sonnet-4",
+          "surface": "ai_usage",
+          "value_tooltip": null
+        },
+        {
+          "amount": 12000.0,
+          "currency": "LKR",
+          "display_name": "Claude Opus 4",
+          "display_value": null,
+          "group": null,
+          "model": "claude-opus-4",
+          "surface": "ai_usage",
+          "value_tooltip": null
+        }
+      ]
+    },
+    {
+      "attention": null,
+      "balance_display": null,
+      "balance_status": null,
+      "breakdown_label": "Breakdown",
+      "currencies": [
+        {
+          "amount": 4300.0,
+          "color_index": 1,
+          "currency": "LKR",
+          "fraction": 0.26380368098159507,
+          "percent_label": "26%"
+        }
+      ],
+      "display_name": "OpenAI",
+      "free_lines": [],
+      "key": "provider:openai:",
+      "model_breakdown": [
+        {
+          "amount": 4300.0,
+          "currency": "LKR",
+          "display_name": "GPT-4o",
+          "display_value": null,
+          "group": null,
+          "model": "gpt-4o",
+          "surface": null,
+          "value_tooltip": null
+        }
+      ]
+    }
+  ],
+  "window_end": "2026-05-01",
+  "window_start": "2026-04-01"
+}

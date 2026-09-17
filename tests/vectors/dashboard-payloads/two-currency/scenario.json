@@ -1,0 +1,63 @@
+{
+  "_comment": "AUTHORED. A two-currency account, and the only scenario with more than one currency. The shape it pins is design 7.0: one ring per currency, per-currency card figures, no report-level money figure. Three things make it discriminating rather than merely multi-key. (1) primary_currency is USD while LKR is the LARGER spend, so the served 4.2 order (USD first) is neither alphabetical (LKR first) nor size-ranked (LKR first) — a regression to either is visible. (2) Anthropic holds money in BOTH currencies, so a card's header lines exercise the per-currency 7.2 shape rather than a single figure. (3) OpenAI holds LKR only, so the LKR ring has two services and its percentages are a real share split (73.6/26.4) instead of the degenerate 100% a one-service ring gives every denominator. Against the frozen clock 2026-04-15T12:00:00Z the whole month is 2026-04-01..2026-04-15. No balance is seeded: balances are sequenced for design 11 step 5 and the corpus carries no balance surface.",
+  "name": "two-currency",
+  "primary_currency": "USD",
+  "seed": {
+    "cards": [
+      {
+        "provider_id": "anthropic",
+        "display_name": "Anthropic",
+        "last_fetched_at": "2026-04-15T11:30:00Z",
+        "last_status": "success",
+        "window_complete": true
+      },
+      {
+        "provider_id": "openai",
+        "display_name": "OpenAI",
+        "last_fetched_at": "2026-04-15T11:45:00Z",
+        "last_status": "success",
+        "window_complete": true
+      }
+    ],
+    "usage_daily": [
+      {
+        "provider_id": "anthropic",
+        "model": "claude-opus-4",
+        "date_utc": "2026-04-02",
+        "cost_usd": 40.0,
+        "currency": "USD"
+      },
+      {
+        "provider_id": "anthropic",
+        "model": "claude-sonnet-4",
+        "date_utc": "2026-04-11",
+        "cost_usd": 27.74,
+        "currency": "USD"
+      },
+      {
+        "provider_id": "anthropic",
+        "model": "claude-opus-4",
+        "date_utc": "2026-04-12",
+        "cost_usd": 12000.0,
+        "currency": "LKR"
+      },
+      {
+        "provider_id": "openai",
+        "model": "gpt-4o",
+        "date_utc": "2026-04-05",
+        "cost_usd": 2800.0,
+        "currency": "LKR"
+      },
+      {
+        "provider_id": "openai",
+        "model": "gpt-4o",
+        "date_utc": "2026-04-11",
+        "cost_usd": 1500.0,
+        "currency": "LKR"
+      }
+    ]
+  },
+  "request": {
+    "_comment": "Portfolio view: no surface is scoped. Present and empty rather than absent, so an unscoped scenario is a stated fact and not an omission."
+  }
+}

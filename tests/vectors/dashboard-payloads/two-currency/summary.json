@@ -1,0 +1,29 @@
+{
+  "burn_rate_7day": {
+    "LKR": 1928.5714,
+    "USD": 3.9629
+  },
+  "days_remaining": 15,
+  "enabled_provider_count": 2,
+  "forecast": {
+    "LKR": 59785.7143,
+    "USD": 122.8486
+  },
+  "incomplete_card_count": 0,
+  "mtd": {
+    "LKR": 16300.0,
+    "USD": 67.74
+  },
+  "newest_fetched_at": "2026-04-15T11:45:00Z",
+  "per_provider_burn": {
+    "anthropic": {
+      "LKR": 1714.2857,
+      "USD": 3.9629
+    },
+    "openai": {
+      "LKR": 214.2857
+    }
+  },
+  "previous_month": {},
+  "stale_cards": []
+}

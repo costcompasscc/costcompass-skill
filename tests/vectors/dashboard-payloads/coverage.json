@@ -24,6 +24,10 @@
     {
       "name": "provider-filtered",
       "why": "The ?provider= scope is a different code path from the portfolio view (design 1.1)."
+    },
+    {
+      "name": "two-currency",
+      "why": "The only multi-currency scenario. Two currencies with real spend, one card holding both (design 7.2), and a primary_currency that is NOT the larger spend \u2014 so the served 4.2 order is distinguishable from both alphabetical and size order, and each ring's percentages are provably a share of that ring rather than of a sum across currencies."
     }
   ],
   "surfaces": [
