@@ -157,6 +157,14 @@ def _table() -> _Table:
     return _parse(raw)
 
 
+def known_locales() -> frozenset[str]:
+    """The locales this table can spell. Callers that read a locale from a
+    server should confirm it is here before formatting: the table is copied
+    into clients that ship on their own cadence, so a server can name a locale
+    an older client does not carry."""
+    return frozenset(_table().locales)
+
+
 def _rules(locale: str | None) -> _LocaleRules:
     rules = _table().locales.get(locale or DEFAULT_LOCALE)
     if rules is None:

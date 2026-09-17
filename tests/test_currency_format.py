@@ -45,3 +45,14 @@ def test_render_money_uses_the_same_table(case: dict) -> None:
         render.money(case["amount"], case["currency"], case["locale"])
         == case["expected"]
     )
+
+
+def test_unknown_locale_falls_back_to_the_default() -> None:
+    """A locale the vendored table does not carry must not reach `format_money`.
+
+    The CLI ships on its own cadence, so a server can add a supported locale
+    before this build is re-vendored; a traceback is not an answer.
+    """
+    assert render.locale_of({"display_locale": "zz-ZZ"}) == render.DEFAULT_LOCALE
+    assert render.locale_of({"display_locale": "de-DE"}) == "de-DE"
+    assert render.format_amount({"mtd": {"USD": 1.5}}, locale="zz-ZZ") == "$1.50"

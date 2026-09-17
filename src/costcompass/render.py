@@ -12,7 +12,7 @@ from typing import Any
 
 from . import currency_totals as ct
 from .api import ApiError, required_totals
-from .currency_format import format_money
+from .currency_format import format_money, known_locales
 
 #: The rendering a reader gets before they have chosen a locale (design §6.2).
 #: The page, the PDF and the macOS app all resolve the same way.
@@ -73,14 +73,26 @@ def money(value: float, currency: str = "USD", locale: str = DEFAULT_LOCALE) -> 
     to prevent, and the sub-cent per-model rows on a metered card are exactly
     where it bites. The default locale keeps the historical USD/en-US output
     byte-identical.
+
+    The locale is resolved here, the one choke point every money figure passes
+    through: a locale the vendored table does not carry falls back to the
+    default rather than raising. The CLI ships on its own cadence, so a server
+    can add a supported locale before this build is re-vendored, and an
+    uncaught `ValueError` there reaches the user as a traceback.
     """
+    if locale not in known_locales():
+        locale = DEFAULT_LOCALE
     return format_money(value, currency, locale)
 
 
 def locale_of(preferences: dict[str, Any] | None) -> str:
     """The reader's display locale, or the product default when unset — the
-    same resolution the web page, the PDF and the macOS app use."""
-    return (preferences or {}).get("display_locale") or DEFAULT_LOCALE
+    same resolution the web page, the PDF and the macOS app use. An
+    unsupported locale resolves to the default (`money` also guards, since it
+    is the choke point every figure passes through).
+    """
+    locale = (preferences or {}).get("display_locale") or DEFAULT_LOCALE
+    return locale if locale in known_locales() else DEFAULT_LOCALE
 
 
 def primary_currency_of(preferences: dict[str, Any] | None) -> str | None:
