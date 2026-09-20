@@ -119,9 +119,13 @@ fixture.
   classes above. The table itself carries all 162 currencies ICU knows and every
   locale in `SUPPORTED_DISPLAY_LOCALES`, but a case is only added for a shape
   worth pinning — the guard is the table, the contract is these cases.
-- **Amounts are finite floats.** Storage is binary double precision, so two
-  implementations can in principle disagree on a value's shortest decimal
-  representation. The half-way cases (`0.015`, `1.005`, `2.675`) are pinned
+- **Amounts are finite doubles at this boundary.** Storage and arithmetic are
+  `numeric` / `Decimal` (`doc/design/money-precision.md`), but both renderers
+  take the **float projection**: `Intl` rounds the double's shortest decimal
+  representation, and an exact `Decimal` can round the other way at a tie
+  (`0.015` against `0.014999999999999999`). `format_money` refuses a `Decimal`
+  outright, so the projection is enforced rather than assumed. The half-way
+  cases (`0.015`, `1.005`, `2.675`, and the negative `-0.005`) are pinned
   precisely because that is where it would show.
 - **A figure wider than the rounding context raises on the PDF side.**
   `format_money` quantizes with `Decimal(str(amount))`, which needs a 28-digit

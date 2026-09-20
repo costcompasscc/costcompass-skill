@@ -30,13 +30,13 @@
         "provider_id": "anthropic",
         "model": "claude-opus-4",
         "date_utc": "2026-04-13",
-        "cost_usd": 11.75
+        "cost": 11.75
       },
       {
         "provider_id": "openai",
         "model": "gpt-4o",
         "date_utc": "2026-04-13",
-        "cost_usd": 3.2
+        "cost": 3.2
       }
     ]
   },

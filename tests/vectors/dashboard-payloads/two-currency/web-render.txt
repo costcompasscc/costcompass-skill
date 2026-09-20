@@ -1,14 +1,15 @@
-dashboard-hero/00	$67.74LKR 16,300.00
-dashboard-hero/01	$122.85
+dashboard-hero/00	$67.74
+dashboard-hero/01	LKR 16,300.00
 dashboard-hero/02	$122.85
-dashboard-hero/03	—
+dashboard-hero/03	$122.85
 dashboard-hero/04	—
-dashboard-hero/05	$3.96 / day
+dashboard-hero/05	—
 dashboard-hero/06	$3.96 / day
-dashboard-hero/07	—
+dashboard-hero/07	$3.96 / day
 dashboard-hero/08	—
 dashboard-hero/09	—
 dashboard-hero/10	—
+dashboard-hero/11	—
 dashboard-breakdown/00	$67.74
 dashboard-breakdown/01	LKR 12,000.00
 dashboard-breakdown/02	LKR 4,300.00

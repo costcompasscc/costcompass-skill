@@ -60,6 +60,13 @@
     {
       "locale": "en-US",
       "currency": "USD",
+      "amount": -0.005,
+      "expected": "-$0.01",
+      "why": "The NEGATIVE half: half away from zero means -$0.01, never $-0.00 or $0.00. The positive tie cases above never reach the sign branch of the rounding rule. Also the case the exact-Decimal hazard turns on -- format_money must round the double's shortest text (-0.005), not an exact Decimal that could fall the other side of the tie."
+    },
+    {
+      "locale": "en-US",
+      "currency": "USD",
       "amount": 0.0553,
       "expected": "$0.06",
       "why": "THE REPORTED BUG: the page said $0.06 and the PDF said $0.05."
