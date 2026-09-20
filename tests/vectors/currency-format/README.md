@@ -135,20 +135,27 @@ fixture.
   `format_usd` this replaced raised at the same value — and no provider reports
   money that large, but the parity claim stops there and a reader comparing the
   two surfaces should know where.
-- **The CLI is wired; the macOS suite still hand-copies.** The CLI
-  (`client/plugin`, the sibling repo) reads a byte-identical copy of this probed
-  table (`costcompass/currency_format_data.json`) and asserts every case here
-  (`tests/test_currency_format.py`) against its vendored copy of
-  `cases.json`. Both are vendored by `scripts/sync-test-vectors.sh` — the table
-  as a file corpus, the corpus as a directory — so `make drift-check-vectors`
-  fails on a byte of drift in either. The two guards answer different
-  questions: `cases.json` is the contract on the OUTPUT, and byte-identity is
-  what stops a re-probe the cases do not cover from reaching the PDF and the
-  page while the CLI keeps the old ICU's spelling. The macOS suite
-  (`client/macos/…/FormattersTests.swift`) still hand-copies the USD/en-US
-  values this corpus inherited from the deleted `money-display-cases.ts`: it
-  formats through Foundation's ICU rather than this table, and Foundation's
-  symbol set differs from the reference ICU this corpus was probed from (for a
-  named gap, `ZAR` renders `R` and `JPY` a fullwidth `￥`), so wiring it
-  mechanically is not available. A case changed here still has to be carried
-  there by hand.
+- **All four renderers are wired.** The CLI (`client/plugin`, the sibling repo)
+  reads a byte-identical copy of this probed table
+  (`costcompass/currency_format_data.json`) and asserts every case here
+  (`tests/test_currency_format.py`) against its vendored copy of `cases.json`.
+  The macOS app reads its own byte-identical copy
+  (`CostCompassKit/Sources/CostCompassKit/Resources/currency_format_data.json`,
+  a shipped SwiftPM resource its `CurrencyFormatTable` executes at runtime) and
+  asserts every case here (`CurrencyFormatCorpusTests`) against this corpus read
+  in place — the test and the corpus share a repository, so no copy is vendored.
+  The two tables and the corpus are kept in step by
+  `scripts/sync-test-vectors.sh`: the tables as file corpora, the CLI's corpus as
+  a directory. `make drift-check-vectors` fails on a byte of drift in any of
+  them. The guards answer different questions: `cases.json` is the contract on
+  the OUTPUT, and byte-identity is what stops a re-probe the cases do not cover
+  from reaching the PDF and the page while a client keeps the old ICU's
+  spelling.
+
+  This closes the gap that used to be named here: the macOS suite read
+  Foundation's ICU, a different build from the one this corpus was probed from,
+  and so spelled `bn-BD` in Latin digits where the page printed `১২`, `fr-CH`
+  with a leading symbol where the page trailed `€`, and `ja-JP` with a narrow
+  `¥` where the page printed the fullwidth `￥`. Those four disagreements were
+  the bug; the app now executes the same table the other three do, so a case
+  changed here is carried to all four or the suite fails.
