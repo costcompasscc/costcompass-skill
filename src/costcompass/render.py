@@ -12,7 +12,7 @@ from typing import Any
 
 from . import currency_totals as ct
 from .api import ApiError, required_totals
-from .currency_format import format_money, known_locales
+from .currency_format import MoneyValueError, format_money, known_locales
 
 #: The rendering a reader gets before they have chosen a locale (design §6.2).
 #: The page, the PDF and the macOS app all resolve the same way.
@@ -79,10 +79,24 @@ def money(value: float, currency: str = "USD", locale: str = DEFAULT_LOCALE) -> 
     default rather than raising. The CLI ships on its own cadence, so a server
     can add a supported locale before this build is re-vendored, and an
     uncaught `ValueError` there reaches the user as a traceback.
+
+    This is likewise the one choke point where a figure the renderer refuses
+    becomes an `ApiError`: a non-finite amount is an incompatible response, and
+    the command layer already prints an `ApiError` and exits 1. Nothing else in
+    this module has to know how a refusal is reported.
     """
     if locale not in known_locales():
         locale = DEFAULT_LOCALE
-    return format_money(value, currency, locale)
+    try:
+        return format_money(value, currency, locale)
+    except MoneyValueError as error:
+        # The message names the currency but never the amount: this figure came
+        # off the wire, and an incompatible response may carry sensitive
+        # material (the same rule `required_totals` follows).
+        raise ApiError(
+            f"Incompatible API response: money value for {currency} is not a "
+            "finite number. Update the CostCompass CLI/plugin and try again."
+        ) from error
 
 
 def locale_of(preferences: dict[str, Any] | None) -> str:
@@ -274,9 +288,23 @@ def _breakdown_block(
 
 
 def _row_amount(row: dict[str, Any]) -> float:
-    """A row's amount for SORTING only; validation happens in `_model_value`."""
+    """A row's amount for SORTING only; validation happens in `_model_value`.
+
+    Returns 0.0 for anything that is not a finite number rather than raising.
+    This runs inside a sort key, where `float(10**400)` raised `OverflowError`
+    and escaped as a traceback before the row it belongs to had been validated
+    at all. Nothing is hidden by the 0.0: `_model_value` still refuses the row
+    when its line is built, so a garbage row is a typed failure rather than a
+    row that sorts as a real zero and prints.
+    """
     value = row.get("amount")
-    return float(value) if type(value) in (int, float) else 0.0
+    if type(value) not in (int, float):
+        return 0.0
+    try:
+        amount = float(value)
+    except OverflowError:
+        return 0.0
+    return amount if math.isfinite(amount) else 0.0
 
 
 def _missing_model_field(field: str) -> ApiError:

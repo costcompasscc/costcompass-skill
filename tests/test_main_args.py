@@ -13,6 +13,11 @@ from costcompass.refresh import orchestrator
 runner = CliRunner()
 
 
+def _reject_json_literal(token: str) -> object:
+    """`json.loads` accepts bare `NaN`/`Infinity`; a strict consumer does not."""
+    raise ValueError(f"bare {token} is not JSON")
+
+
 def _now_iso() -> str:
     """A just-now fetch stamp, in the format the server sends."""
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -598,6 +603,20 @@ def test_auth_status_refresh_not_ready_without_vault(
     report = json.loads(result.output)
 
     # Spend works, refresh does not — the distinction the skill's preflight needs.
+    assert result.exit_code == 0
+    assert report["ready"] == {"spend": True, "refresh": False}
+
+
+def test_auth_status_json_is_strict_json(clean_env, fake_store, monkeypatch):
+    """``auth status --json`` shares the one encoder, so a strict parser reads
+    it. The property is worth asserting on this sink too because it is the one
+    JSON document the report is built from locally rather than off the wire."""
+    fake_store.write(secrets.SecretItem.API_KEY, "sk-good")
+    monkeypatch.setattr(main.api, "Client", _client())
+
+    result = runner.invoke(main.app, ["auth", "status", "--json"])
+    report = json.loads(result.output, parse_constant=_reject_json_literal)
+
     assert result.exit_code == 0
     assert report["ready"] == {"spend": True, "refresh": False}
 

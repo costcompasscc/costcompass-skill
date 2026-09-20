@@ -34,16 +34,33 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import MAX_EMAX, MIN_EMIN, ROUND_HALF_UP, Context, Decimal, localcontext
 from functools import lru_cache
 from math import isfinite
 from pathlib import Path
 from typing import Any
 
+
+class MoneyValueError(ValueError):
+    """An amount this renderer cannot spell as a finite minor-unit figure.
+
+    Raised only for a non-finite amount. It subclasses ``ValueError`` because
+    that is what this module raised before the type existed, and the failure a
+    caller has to branch on is exactly "the renderer refused this figure" — a
+    ``MoneyValueError`` says that in the type instead of in a message a caller
+    would have to match. A finite amount is never refused; see
+    :func:`_precision_for`.
+    """
+
+
 #: The rendering a user gets before they have chosen a locale (§6.2). The page
 #: resolves the same way (``frontend/src/components/DisplayLocaleProvider.tsx``),
 #: so an account that never set one renders identically on both surfaces.
 DEFAULT_LOCALE = "en-US"
+
+#: The standard decimal precision, and this module's floor: a caller that
+#: narrowed its own context cannot reduce the digits a figure is spelled with.
+DEFAULT_PRECISION = 28
 
 #: Assumed fraction digits for a well-formed code ICU does not know. Matches
 #: ICU's own default for an unlisted currency, and the two agree by
@@ -228,6 +245,44 @@ def _localize(text: str, digits: str) -> str:
     )
 
 
+def _precision_for(value: Decimal, unit: Decimal) -> int:
+    """Digits enough to quantize *value* to *unit* and spell the result.
+
+    Measured from the value, with a floor of :data:`DEFAULT_PRECISION` rather
+    than from the ambient context's own precision — the figure must not shrink
+    because a caller narrowed its context, and the accepted input is a
+    ``float``, so the computed term is sufficient rather than best-effort (at
+    most 17 significant digits, an adjusted exponent within ±308).
+    """
+    scale = max(0, -unit.adjusted())
+    return max(
+        DEFAULT_PRECISION,
+        value.adjusted() + 1 + scale + 1,
+        len(value.as_tuple().digits) + scale + 1,
+    )
+
+
+def _render_context(value: Decimal, unit: Decimal) -> Context:
+    """The decimal context this module renders inside — its own, not the caller's.
+
+    ``quantize`` and ``Decimal.__format__`` both round inside the ambient
+    context, and three of that context's properties decide the figure or the
+    failure: too few digits could not quantize a large finite amount at all
+    (``1e308`` raised ``InvalidOperation`` from inside a rendering pass), a
+    narrowed ``Emax``/``Emin`` or a trapped ``Inexact``/``Rounded`` refused a
+    finite amount the page spells, and the rounding mode is not the caller's to
+    choose. None of those is a property of the rounding rule this module owns,
+    so the context is built rather than inherited, and the caller's own context
+    is left untouched.
+    """
+    return Context(
+        prec=_precision_for(value, unit),
+        rounding=ROUND_HALF_UP,
+        Emax=MAX_EMAX,
+        Emin=MIN_EMIN,
+    )
+
+
 def _render(amount: Decimal, currency: str, locale: str | None) -> str:
     rules = _rules(locale)
     integer, _, fraction = f"{abs(amount):.{_fraction_digits(currency)}f}".partition(
@@ -269,21 +324,21 @@ def format_money(
       plain positive zero, because ``-¥0`` is not a figure.
 
     ``show_tiny=False`` is for callers that want the suppressed zero — the
-    dashboard's axis labels do the same thing for the same reason. An amount
-    that is not finite raises: every money value in this system is a
-    :class:`~app.core.money.Money`, which rejects those at construction, so a
-    non-finite figure here is a bug rather than a state to render.
+    dashboard's axis labels do the same thing for the same reason. A
+    non-finite amount raises :class:`MoneyValueError`: every money value in this
+    system is a :class:`~app.core.money.Money`, which rejects those at
+    construction, so a non-finite figure here is a bug rather than a state to
+    render. A *finite* amount is never refused, and the figure does not depend
+    on the caller's decimal context — see :func:`_render_context`.
     """
     if not isfinite(amount):
-        raise ValueError(f"cannot format a non-finite amount: {amount!r}")
+        raise MoneyValueError(f"cannot format a non-finite amount: {amount!r}")
     unit = Decimal(1).scaleb(-_fraction_digits(currency))
     value = Decimal(str(amount))
-    try:
+    with localcontext(_render_context(value, unit)):
         rounded = value.quantize(unit, rounding=ROUND_HALF_UP)
-    except InvalidOperation as error:  # pragma: no cover — guarded by isfinite above
-        raise ValueError(f"cannot format {amount!r} as {currency}") from error
-    if rounded == 0:
-        if show_tiny and value > 0:
-            return f"< {_render(unit, currency, locale)}"
-        return _render(Decimal(0), currency, locale)
-    return _render(rounded, currency, locale)
+        if rounded == 0:
+            if show_tiny and value > 0:
+                return f"< {_render(unit, currency, locale)}"
+            return _render(Decimal(0), currency, locale)
+        return _render(rounded, currency, locale)

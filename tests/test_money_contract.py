@@ -206,12 +206,19 @@ def test_commands_fail_when_a_model_row_names_no_currency(monkeypatch, as_json):
     assert "Traceback" not in result.output
 
 
-def _install_api(monkeypatch, summary, cards):
+def _install_api(monkeypatch, summary, cards, *, raw=None):
     requests = []
+    raw = raw or {}
 
     def handler(request):
         path = request.url.path
         requests.append(path)
+        for suffix, body in raw.items():
+            if path.endswith(suffix):
+                # Raw bytes, not ``json=``: httpx encodes a JSON body with
+                # ``allow_nan=False``, so a lenient upstream that wrote a bare
+                # ``NaN`` can only be reproduced by writing the bytes here.
+                return httpx.Response(200, content=body)
         if path.endswith("/dashboard/summary"):
             body = summary
         elif path.endswith("/dashboard/breakdown"):
@@ -261,3 +268,158 @@ def test_refresh_json_preserves_float_output(monkeypatch, value):
         "mtd": {"USD": float(value)},
         "providers": [],
     }
+
+
+# --- A36: non-finite money and strict JSON -------------------------------
+#
+# ``json.loads`` accepts the bare ``NaN``/``Infinity``/``-Infinity`` literals;
+# ``JSON.parse``, ``jq`` and Go's decoder reject them. The CLI took them off the
+# wire and handed them straight back under ``--json``, so stdout could be a
+# document no strict JSON parser will read. httpx encodes its *own* replies with
+# ``allow_nan=False``, which is why the lenient replies below are raw bytes:
+# a lenient upstream is the premise of the failure.
+
+
+def _reject_constant(token: str) -> Any:
+    raise ValueError(f"bare {token} is not JSON")
+
+
+def _load_strict(text: str) -> Any:
+    """*text* parsed the way a strict consumer parses it."""
+    return json.loads(text, parse_constant=_reject_constant)
+
+
+def test_json_output_is_strict(monkeypatch):
+    """The property is produced here, so it is asserted here: every byte of a
+    successful ``--json`` stdout is readable by a strict parser."""
+    _install_api(monkeypatch, {key: dict(t) for key, t in SUMMARY.items()}, [])
+    result = CliRunner().invoke(main.app, ["mtd", "--json"])
+    assert result.exit_code == 0, result.output
+    assert _load_strict(result.stdout)["mtd"] == {"USD": 12.0}
+
+
+@pytest.mark.parametrize("token", ["NaN", "Infinity", "-Infinity"])
+def test_json_output_refuses_a_bare_literal_it_cannot_re_emit(monkeypatch, token):
+    """A number this CLI only passes through must fail the command rather than
+    reach the caller as a bare literal. ``burn_rate_7day`` is deliberately a
+    field ``mtd`` never reads, so nothing here is a figure the CLI refused to
+    *spell* — the document itself is what only JSON mode re-emits."""
+    raw = b'{"mtd": {"USD": 12.0}, "burn_rate_7day": {"USD": ' + token.encode() + b"}}"
+    _install_api(monkeypatch, None, [], raw={"dashboard/summary": raw})
+    result = CliRunner().invoke(main.app, ["mtd", "--json"])
+    assert result.exit_code == 1, result.output
+    assert result.stdout == ""
+    assert "JSON cannot" in result.stderr
+    assert token not in result.stdout
+    assert "Traceback" not in result.output
+
+
+def test_human_output_ignores_a_field_only_json_re_emits(monkeypatch):
+    """The boundary is what the CLI spells. The same reply renders fine as
+    text because no human line reads that field; per-field response validation
+    is a separate contract."""
+    raw = b'{"mtd": {"USD": 12.0}, "burn_rate_7day": {"USD": NaN}}'
+    _install_api(monkeypatch, None, [], raw={"dashboard/summary": raw})
+    result = CliRunner().invoke(main.app, ["mtd"])
+    assert result.exit_code == 0, result.output
+    assert result.stdout.strip() == "$12.00"
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+def test_breakdown_refuses_a_total_that_overflows(monkeypatch, as_json):
+    """Two finite amounts can sum past the double range, and the total is then
+    a number neither output can carry: ``--json`` wrote the bare ``Infinity``
+    and the human renderer raised a bare ``ValueError`` out of ``quantize``.
+    Both are the one typed failure now."""
+    cards = [
+        {"provider_id": "a", "display_name": "A", "totals": {"USD": 1e308}},
+        {"provider_id": "b", "display_name": "B", "totals": {"USD": 1e308}},
+    ]
+    _install_api(monkeypatch, {key: dict(t) for key, t in SUMMARY.items()}, cards)
+    result = CliRunner().invoke(
+        main.app, ["mtd", "breakdown", *(["--json"] if as_json else [])]
+    )
+    assert result.exit_code == 1, result.output
+    assert result.stdout == ""
+    assert "Incompatible API response" in result.stderr
+    assert "Traceback" not in result.output
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+@pytest.mark.parametrize(
+    "amount", [10**400, float("nan"), float("inf"), "12.0", None, [12.0]]
+)
+def test_details_refuses_a_model_amount_it_cannot_spell(monkeypatch, as_json, amount):
+    """A model row's amount is the same boundary as a totals map: anything
+    that is not a finite number is one typed failure, not an ``OverflowError``
+    from the sort key (``10**400``) or an unpriced row rendered as a display
+    value (``None``)."""
+    cards = [
+        {
+            "provider_id": "example",
+            "display_name": "Example",
+            "totals": {"USD": 12.0},
+            "model_breakdown": [
+                {"model": "model", "currency": "USD", "amount": amount}
+            ],
+        }
+    ]
+    _install_api(
+        monkeypatch,
+        {key: dict(t) for key, t in SUMMARY.items()},
+        None,
+        # Written as bytes with ``json.dumps``'s lenient default: httpx's own
+        # ``json=`` refuses a non-finite number, and a server that sends one is
+        # exactly the upstream under test.
+        raw={"dashboard/breakdown": json.dumps(cards).encode()},
+    )
+    result = CliRunner().invoke(
+        main.app, ["mtd", "example", "details", *(["--json"] if as_json else [])]
+    )
+    assert result.exit_code == 1, result.output
+    assert result.stdout == ""
+    assert "amount" in result.stderr
+    assert "Traceback" not in result.output
+
+
+@pytest.mark.parametrize("token", [float("nan"), float("inf"), float("-inf")])
+def test_json_encoder_refuses_a_number_json_cannot_represent(token):
+    """The encoder is the invariant, so a number JSON cannot represent is an
+    incompatible response wherever it sits — nested under a money map or not.
+    The message is fixed text: nothing from the document is interpolated."""
+    with pytest.raises(api.ApiError, match="JSON cannot") as exc:
+        main._json_text({"mtd": {"USD": 12.0}, "detail": {"rate": token}})
+    assert "Incompatible API response" in str(exc.value)
+
+
+def test_json_encoder_writes_the_document_shape_consumers_parse():
+    assert _load_strict(main._json_text({"mtd": {"USD": 12.0}})) == {
+        "mtd": {"USD": 12.0}
+    }
+
+
+def test_refresh_json_refuses_an_outcome_it_cannot_encode(monkeypatch):
+    """``events_ingested`` is the broker's count, reported back here, so it is
+    another field a lenient upstream can put a bare literal in. The refresh
+    sink shares the one encoder."""
+    _install_api(monkeypatch, {"mtd": {"USD": 1.0}}, [])
+    monkeypatch.setattr(
+        orchestrator,
+        "run",
+        lambda *a, **kw: orchestrator.RefreshResult(
+            outcomes=[
+                orchestrator.EntryOutcome(
+                    provider_id="example",
+                    instance_key="",
+                    state="success",
+                    events_ingested=float("inf"),
+                )
+            ],
+            mtd={"USD": 1.0},
+        ),
+    )
+    result = CliRunner().invoke(main.app, ["mtd", "refresh", "--vault", "--json"])
+    assert result.exit_code == 1, result.output
+    assert result.stdout == ""
+    assert "JSON cannot" in result.stderr
+    assert "Traceback" not in result.output

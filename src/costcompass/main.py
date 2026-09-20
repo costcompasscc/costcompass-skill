@@ -151,6 +151,32 @@ def _models_for(
     return models
 
 
+def _json_text(data: Any) -> str:
+    """*data* as strict JSON — the one encoder every JSON output uses.
+
+    ``json.dumps`` defaults to ``allow_nan=True``, which writes the bare
+    ``NaN``/``Infinity``/``-Infinity`` literals. Those are not JSON, and this
+    CLI is the one place that can notice: it *accepts* them off the wire
+    (``json.loads`` is lenient where ``JSON.parse`` is not) and passes whole
+    server documents through under ``--json``, so without this it could hand a
+    caller a document no strict parser will read. ``httpx`` encodes its own
+    replies with ``allow_nan=False``, which is why a synthetic reply in a test
+    has to be raw bytes to reproduce this.
+
+    A document that cannot be encoded is an incompatible response rather than a
+    traceback, so the failure leaves as the ``ApiError`` the command layer
+    already prints and exits 1 on.
+    """
+    try:
+        return json.dumps(data, indent=2, allow_nan=False)
+    except ValueError as error:
+        raise api.ApiError(
+            "Incompatible API response: it carries a number JSON cannot "
+            "represent (NaN or infinity). Update the CostCompass CLI/plugin "
+            "and try again."
+        ) from error
+
+
 def _emit(as_json: bool, data: Any, text: str, note: str | None = None) -> None:
     """Print machine JSON or the human text, depending on ``--json``.
 
@@ -158,7 +184,7 @@ def _emit(as_json: bool, data: Any, text: str, note: str | None = None) -> None:
     pbcopy`` still yields just the figure. Suppressed under ``--json``: a hint
     on either stream would contaminate output something is parsing.
     """
-    typer.echo(json.dumps(data, indent=2) if as_json else text)
+    typer.echo(_json_text(data) if as_json else text)
     if note and not as_json:
         typer.echo(note, err=True)
 
@@ -288,10 +314,13 @@ def mtd(
                 echo=(lambda *_: None) if as_json else typer.echo,
                 progress=progress,
             )
+            # Inside the same handler as the run itself: `_json_text` refuses a
+            # document it cannot encode with an ApiError, and that belongs on
+            # the same err/no-stdout path as a failed run.
+            if as_json:
+                typer.echo(_json_text(_refresh_payload(result)))
         except (api.ApiError, services.ResolveError, orchestrator.RefreshError) as exc:
             _fail(str(exc))
-        if as_json:
-            typer.echo(json.dumps(_refresh_payload(result), indent=2))
         return
 
     try:
@@ -518,7 +547,10 @@ def auth_status(
     """Report whether the API key and vault password are usable."""
     report = _auth_report()
     if as_json:
-        typer.echo(json.dumps(report))
+        try:
+            typer.echo(_json_text(report))
+        except api.ApiError as exc:
+            _fail(str(exc))
         raise typer.Exit(0 if report["ready"]["spend"] else 1)
 
     typer.echo(f"Server: {report['server']}")

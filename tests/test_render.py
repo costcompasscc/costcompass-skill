@@ -2,12 +2,52 @@ from __future__ import annotations
 
 import pytest
 
-from costcompass import render
+from costcompass import api, render
 
 
 def test_money():
     assert render.money(1234.5) == "$1,234.50"
     assert render.money(0) == "$0.00"
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_money_reports_a_non_finite_amount_as_a_typed_failure(value):
+    """The one choke point turns the renderer's refusal into the failure the
+    command layer already prints and exits 1 on — not the bare ``ValueError``
+    (a traceback on stderr) it used to be. The message names the currency and
+    never the amount, which came off the wire."""
+    with pytest.raises(api.ApiError, match="not a finite number") as exc:
+        render.money(value, "EUR")
+    assert "Incompatible API response" in str(exc.value)
+    assert "EUR" in str(exc.value)
+    assert "nan" not in str(exc.value).lower()
+
+
+def test_money_spells_a_finite_amount_of_any_magnitude():
+    """A finite amount is always spellable. The default decimal context holds
+    28 digits, and ``quantize`` inside it refused ``1e26`` — a bare
+    ``ValueError`` from inside a rendering pass, so a month that summed past
+    the context limit printed a traceback for a figure the page spells. The
+    whole number is spelled, not abbreviated or rounded away."""
+    assert render.money(1e26) == "$100,000,000,000,000,000,000,000,000.00"
+    huge = render.money(1e308)
+    assert huge.startswith("$100,000,") and huge.endswith("000.00")
+    assert "e" not in huge and "E" not in huge
+
+
+def test_row_amount_never_raises_from_a_sort_key():
+    """Sorting is not validation. ``float(10**400)`` raised ``OverflowError``
+    inside the key, so a bad row aborted the command before the row was ever
+    validated — and with a traceback rather than the typed failure. The key
+    now returns 0.0 and ``_model_value`` still refuses the row when its line is
+    built."""
+    assert render._row_amount({"amount": 10**400}) == 0.0
+    assert render._row_amount({"amount": "12.0"}) == 0.0
+    assert render._row_amount({"amount": float("nan")}) == 0.0
+    assert render._row_amount({"amount": float("inf")}) == 0.0
+    assert render._row_amount({}) == 0.0
+    assert render._row_amount({"amount": -1.5}) == -1.5
+    assert render._row_amount({"amount": 12}) == 12.0
 
 
 # The cross-implementation table. Its home is
