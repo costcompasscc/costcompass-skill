@@ -8,5 +8,6 @@
   "newest_fetched_at": null,
   "per_provider_burn": {},
   "previous_month": {},
+  "spend_gap_count": 0,
   "stale_cards": []
 }

@@ -146,6 +146,8 @@
       ]
     }
   ],
+  "spend_gap_caveat": null,
+  "spend_gap_count": 0,
   "window_end": "2026-05-01",
   "window_start": "2026-04-01"
 }
