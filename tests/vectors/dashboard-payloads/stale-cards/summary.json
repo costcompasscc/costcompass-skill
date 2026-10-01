@@ -34,5 +34,6 @@
       "instance_key": "",
       "provider_id": "openai"
     }
-  ]
+  ],
+  "tokens": null
 }

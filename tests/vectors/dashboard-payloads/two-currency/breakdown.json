@@ -12,6 +12,7 @@
         "display_value": null,
         "group": null,
         "model": "claude-opus-4",
+        "served_by": [],
         "surface": "ai_usage",
         "value_tooltip": null
       },
@@ -22,6 +23,7 @@
         "display_value": null,
         "group": null,
         "model": "claude-opus-4",
+        "served_by": [],
         "surface": "ai_usage",
         "value_tooltip": null
       },
@@ -32,6 +34,7 @@
         "display_value": null,
         "group": null,
         "model": "claude-sonnet-4",
+        "served_by": [],
         "surface": "ai_usage",
         "value_tooltip": null
       }
@@ -55,6 +58,7 @@
         "display_value": null,
         "group": null,
         "model": "gpt-4o",
+        "served_by": [],
         "surface": null,
         "value_tooltip": null
       }

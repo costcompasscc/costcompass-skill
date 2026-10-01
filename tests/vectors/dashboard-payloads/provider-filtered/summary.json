@@ -17,5 +17,6 @@
     "USD": 31.5
   },
   "spend_gap_count": 0,
-  "stale_cards": []
+  "stale_cards": [],
+  "tokens": null
 }
