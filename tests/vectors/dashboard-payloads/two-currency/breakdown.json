@@ -14,6 +14,7 @@
         "model": "claude-opus-4",
         "served_by": [],
         "surface": "ai_usage",
+        "usage_display": null,
         "value_tooltip": null
       },
       {
@@ -25,6 +26,7 @@
         "model": "claude-opus-4",
         "served_by": [],
         "surface": "ai_usage",
+        "usage_display": null,
         "value_tooltip": null
       },
       {
@@ -36,6 +38,7 @@
         "model": "claude-sonnet-4",
         "served_by": [],
         "surface": "ai_usage",
+        "usage_display": null,
         "value_tooltip": null
       }
     ],
@@ -43,7 +46,8 @@
     "totals": {
       "LKR": 12000.0,
       "USD": 67.74
-    }
+    },
+    "usage_display": null
   },
   {
     "breakdown_label": "Breakdown",
@@ -60,12 +64,14 @@
         "model": "gpt-4o",
         "served_by": [],
         "surface": null,
+        "usage_display": null,
         "value_tooltip": null
       }
     ],
     "provider_id": "openai",
     "totals": {
       "LKR": 4300.0
-    }
+    },
+    "usage_display": null
   }
 ]

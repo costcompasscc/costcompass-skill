@@ -14,13 +14,15 @@
         "model": "gpt-4o",
         "served_by": [],
         "surface": null,
+        "usage_display": null,
         "value_tooltip": null
       }
     ],
     "provider_id": "openai",
     "totals": {
       "USD": 6.5
-    }
+    },
+    "usage_display": null
   },
   {
     "breakdown_label": "Breakdown",
@@ -37,12 +39,14 @@
         "model": "mock-large",
         "served_by": [],
         "surface": null,
+        "usage_display": null,
         "value_tooltip": null
       }
     ],
     "provider_id": "mock",
     "totals": {
       "USD": 2.25
-    }
+    },
+    "usage_display": null
   }
 ]

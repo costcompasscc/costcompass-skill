@@ -70,6 +70,7 @@
           "group": null,
           "model": "claude-opus-4",
           "surface": "ai_usage",
+          "usage_display": null,
           "value_tooltip": null
         }
       ]
@@ -100,6 +101,7 @@
           "group": null,
           "model": "gpt-4o",
           "surface": null,
+          "usage_display": null,
           "value_tooltip": null
         }
       ]
