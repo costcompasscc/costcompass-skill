@@ -194,6 +194,67 @@ def test_format_details_display_value_for_unpriced():
     assert "$0.00" not in out.split("\n")[-1]
 
 
+def test_format_details_shows_usage_beside_money():
+    summary = {
+        "mtd": {"USD": 4.1},
+        "burn_rate_7day": {"USD": 0.0},
+        "forecast": {"USD": 0.0},
+        "previous_month": {"USD": 0.0},
+    }
+    models = [
+        {
+            "model": "paid",
+            "display_name": "Paid",
+            "amount": 4.1,
+            "currency": "USD",
+            "usage_display": "1.2M tokens",
+        },
+        {
+            "model": "free",
+            "display_name": "Free",
+            "amount": 0.0,
+            "currency": "USD",
+            "usage_display": "25 credits",
+        },
+        {
+            "model": "plain",
+            "display_name": "Plain",
+            "amount": 1.0,
+            "currency": "USD",
+            "usage_display": None,
+        },
+    ]
+    lines = [
+        line.strip()
+        for line in render.format_details("X", summary, models).splitlines()
+    ]
+    assert f"{'Paid':<32} 1.2M tokens · $4.10" in lines
+    assert f"{'Free':<32} 25 credits · $0.00" in lines
+    # No usage: the line is exactly what it was before usage existed.
+    assert f"{'Plain':<32} $1.00" in lines
+
+
+def test_usage_display_is_neutralized():
+    cards = [
+        {
+            "provider_id": "x",
+            "display_name": "X",
+            "totals": {"USD": 0.0},
+            "usage_display": "\x1b[31m9 credits",
+        }
+    ]
+    out = render.format_breakdown(cards)
+    assert "\x1b" not in out
+    assert "9 credits" in out
+
+
+def test_format_breakdown_without_usage_is_unchanged():
+    cards = [{"provider_id": "a", "display_name": "A", "totals": {"USD": 2.0}}]
+    with_null = [{**cards[0], "usage_display": None}]
+    assert render.format_breakdown(cards) == render.format_breakdown(with_null)
+    assert render.format_breakdown(cards).splitlines()[0] == "  $2.00  A"
+
+
 def test_format_details_surface_ordering():
     summary = {
         "mtd": {"USD": 10.0},

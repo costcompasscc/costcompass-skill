@@ -209,6 +209,9 @@ def _card_payload(card: dict[str, Any]) -> dict[str, Any]:
         # Per currency, never a scalar: one card can hold money in two (§7.2).
         # Validated, so a malformed row fails loud rather than printing $0.
         "totals": api.required_totals(card, "totals"),
+        # What the card used in native units ("25 credits"); None when the
+        # server could not name one usage for it.
+        "usage_display": card.get("usage_display"),
     }
 
 

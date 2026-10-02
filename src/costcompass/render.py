@@ -281,10 +281,25 @@ def _breakdown_block(
         name = safe_text(c.get("display_name") or c.get("provider_id") or "")
         kind = c.get("kind") or "provider"
         tag = "" if kind == "provider" else f"  ({safe_text(kind)})"
-        lines.append(f"  {amount:>{width}}  {name}{tag}")
+        usage = _usage_display(c)
+        used = f"  {usage}" if usage else ""
+        lines.append(f"  {amount:>{width}}  {name}{tag}{used}")
     lines.append(f"  {'-' * width}")
     lines.append(f"  {money(total, currency, locale):>{width}}  Total")
     return "\n".join(lines)
+
+
+def _usage_display(row: dict[str, Any]) -> str | None:
+    """What a card or line used in native units ("25 credits"), or None.
+
+    Shown beside the money, never instead of it: a $0.00 line that used
+    something reads as free-tier usage rather than as a broken integration.
+    Server text, so it goes through ``safe_text`` like every other name.
+    """
+    value = row.get("usage_display")
+    if not isinstance(value, str) or not value:
+        return None
+    return safe_text(value)
 
 
 def _row_amount(row: dict[str, Any]) -> float:
@@ -461,5 +476,9 @@ def _model_lines(
                 lines.append(f"{indent_extra}{safe_text(label)}:")
         indent = f"  {indent_extra}" if current_surface else indent_extra
         name = safe_text(row.get("display_name") or row.get("model", ""))
-        lines.append(f"{indent}{name:<32} {_model_value(row, locale, currency)}")
+        value = _model_value(row, locale, currency)
+        usage = _usage_display(row)
+        if usage:
+            value = f"{usage} · {value}"
+        lines.append(f"{indent}{name:<32} {value}")
     return lines

@@ -318,6 +318,13 @@ class _FakeCardsClient:
                 "kind": "subscription",
                 "totals": {"USD": 14.5},
             },
+            {
+                "provider_id": "elevenlabs",
+                "display_name": "ElevenLabs",
+                "kind": "provider",
+                "totals": {"USD": 0.0},
+                "usage_display": "25 credits",
+            },
         ]
 
 
@@ -329,6 +336,7 @@ def test_breakdown_human(clean_env, monkeypatch):
     assert "Anthropic" in result.output
     assert "Higgsfield" in result.output
     assert "Total" in result.output
+    assert "ElevenLabs  25 credits" in result.output
 
 
 def test_breakdown_json(clean_env, monkeypatch):
@@ -340,6 +348,9 @@ def test_breakdown_json(clean_env, monkeypatch):
     assert data["totals"] == {"USD": round(96.71 + 14.5, 4)}
     assert data["cards"][0]["display_name"] == "Anthropic"  # ranked by cost
     assert any(c["kind"] == "subscription" for c in data["cards"])
+    by_name = {c["display_name"]: c for c in data["cards"]}
+    assert by_name["ElevenLabs"]["usage_display"] == "25 credits"
+    assert by_name["Anthropic"]["usage_display"] is None
 
 
 def test_subscription_resolves_via_breakdown(clean_env, monkeypatch):
