@@ -289,6 +289,19 @@ def _breakdown_block(
     return "\n".join(lines)
 
 
+def _served_by_note(row: dict[str, Any]) -> str | None:
+    """Who actually served a model line ("via Amazon Bedrock, Anthropic").
+
+    The server decides when there is one and words it; printed verbatim on
+    its own line under the model, never beside the money. Server text, so it
+    goes through ``safe_text``.
+    """
+    value = row.get("served_by_note")
+    if not isinstance(value, str) or not value:
+        return None
+    return safe_text(value)
+
+
 def _usage_display(row: dict[str, Any]) -> str | None:
     """What a card or line used in native units ("25 credits"), or None.
 
@@ -481,4 +494,7 @@ def _model_lines(
         if usage:
             value = f"{usage} · {value}"
         lines.append(f"{indent}{name:<32} {value}")
+        served_by = _served_by_note(row)
+        if served_by:
+            lines.append(f"{indent}  {served_by}")
     return lines

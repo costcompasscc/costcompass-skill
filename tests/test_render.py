@@ -234,6 +234,69 @@ def test_format_details_shows_usage_beside_money():
     assert f"{'Plain':<32} $1.00" in lines
 
 
+def test_format_details_puts_served_by_note_under_its_model():
+    summary = {
+        "mtd": {"USD": 3.0},
+        "burn_rate_7day": {"USD": 0.0},
+        "forecast": {"USD": 0.0},
+        "previous_month": {"USD": 0.0},
+    }
+    models = [
+        {
+            "model": "routed",
+            "display_name": "Routed",
+            "amount": 2.0,
+            "currency": "USD",
+            "served_by_note": "via Amazon Bedrock, Anthropic",
+        },
+        {
+            "model": "plain",
+            "display_name": "Plain",
+            "amount": 1.0,
+            "currency": "USD",
+            "served_by_note": None,
+        },
+    ]
+    lines = render.format_details("X", summary, models).splitlines()
+    routed = next(
+        i for i, line in enumerate(lines) if line.strip().startswith("Routed")
+    )
+    # Its own line, indented under the model name.
+    assert lines[routed + 1] == lines[routed][: lines[routed].index("Routed")] + (
+        "  via Amazon Bedrock, Anthropic"
+    )
+    # No note: nothing extra, and the same output as a row without the key.
+    assert not any("via" in line for line in lines[routed + 2 :])
+    without_key = [
+        models[0],
+        {k: v for k, v in models[1].items() if k != "served_by_note"},
+    ]
+    assert render.format_details("X", summary, models) == render.format_details(
+        "X", summary, without_key
+    )
+
+
+def test_served_by_note_is_neutralized():
+    summary = {
+        "mtd": {"USD": 1.0},
+        "burn_rate_7day": {"USD": 0.0},
+        "forecast": {"USD": 0.0},
+        "previous_month": {"USD": 0.0},
+    }
+    models = [
+        {
+            "model": "m",
+            "display_name": "M",
+            "amount": 1.0,
+            "currency": "USD",
+            "served_by_note": "\x1b[31mvia X",
+        }
+    ]
+    out = render.format_details("X", summary, models)
+    assert "\x1b" not in out
+    assert "via X" in out
+
+
 def test_usage_display_is_neutralized():
     cards = [
         {
