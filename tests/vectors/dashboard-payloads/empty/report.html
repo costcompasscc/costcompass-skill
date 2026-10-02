@@ -264,6 +264,18 @@
       .rows tr:last-child td {
         border-bottom: 0;
       }
+      /* The served-by note is the row's second line, across both columns so
+         it wraps at the card's width rather than the name's. The rule moves
+         below it: the line it ends is the note's, not the name's. */
+      .rows tr.has-note td {
+        border-bottom: 0;
+        padding-bottom: 0;
+      }
+      .rows td.served-by {
+        padding-top: 0;
+        font-size: 7.5pt;
+        color: var(--ink-muted);
+      }
       /* §7.3: the amount column sizes to the widest figure on the card, so a
          label gives up its width before a number breaks. A money figure split
          across two lines is not a figure anyone should have to reassemble —

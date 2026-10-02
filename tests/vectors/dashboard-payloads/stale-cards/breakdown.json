@@ -12,7 +12,7 @@
         "display_value": null,
         "group": null,
         "model": "gpt-4o",
-        "served_by": [],
+        "served_by_note": null,
         "surface": null,
         "usage_display": null,
         "value_tooltip": null
@@ -37,7 +37,7 @@
         "display_value": null,
         "group": null,
         "model": "mock-large",
-        "served_by": [],
+        "served_by_note": null,
         "surface": null,
         "usage_display": null,
         "value_tooltip": null
