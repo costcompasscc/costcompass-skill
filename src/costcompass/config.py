@@ -28,7 +28,7 @@ from pathlib import Path
 
 from . import secrets
 
-DEFAULT_API_URL = "https://costcompass.cc/api/v1"
+DEFAULT_API_URL = "https://app.costcompass.cc/api/v1"
 ENV_API_KEY = "COSTCOMPASS_API_KEY"
 ENV_API_URL = "COSTCOMPASS_API_URL"
 ENV_VAULT_PASSWORD = "COSTCOMPASS_VAULT_PASSWORD"

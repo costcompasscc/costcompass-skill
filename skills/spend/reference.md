@@ -42,7 +42,7 @@ type.
 Build the settings link from the `server` field of the `auth status` output you
 just ran: strip the trailing `/api/v1` and append `/app/settings/api-keys`. That
 way the link points at whatever stack they are actually configured against
-(`https://costcompass.cc/api/v1` → `https://costcompass.cc/app/settings/api-keys`;
+(`https://app.costcompass.cc/api/v1` → `https://app.costcompass.cc/app/settings/api-keys`;
 a local dev stack → `http://localhost:8080/app/settings/api-keys`). Use the
 `server` value to build the URL — do not print the raw JSON it came from.
 

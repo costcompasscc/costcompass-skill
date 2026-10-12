@@ -125,7 +125,7 @@ won, so "which one am I actually using?" is never a guess.
 | -------------- | --------------------- | ---------------------------- | ----------------------------------- |
 | API key        | OS credential store   | `COSTCOMPASS_API_KEY`        | — (never the config file)           |
 | Vault password | OS credential store   | `COSTCOMPASS_VAULT_PASSWORD` | `vault_password` in the config file |
-| Base URL       | `COSTCOMPASS_API_URL` | `api_url` in the config file | `https://costcompass.cc/api/v1`     |
+| Base URL       | `COSTCOMPASS_API_URL` | `api_url` in the config file | `https://app.costcompass.cc/api/v1` |
 
 The **OS credential store** is your platform's own: Keychain on macOS,
 Credential Manager on Windows, Secret Service on Linux (KWallet and other
