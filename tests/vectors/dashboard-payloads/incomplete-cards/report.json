@@ -42,6 +42,7 @@
       "display_name": "Mock Provider"
     }
   ],
+  "not_counted": [],
   "primary_currency": null,
   "services": [
     {
