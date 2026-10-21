@@ -2186,6 +2186,1483 @@
           }
         ]
       }
+    },
+    {
+      "name": "for-each-nested-list-then-items",
+      "auth_headers": {
+        "X-Auth": "a"
+      },
+      "signing_token": "tok",
+      "program": {
+        "purpose": "bills",
+        "bindings": {
+          "since": "2026-01-01"
+        },
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "api",
+              "path": "/me/bill",
+              "method": "GET",
+              "query": {
+                "date.from": "{since}"
+              },
+              "headers": {},
+              "body": null,
+              "purpose": "bill_ids"
+            },
+            "extract": [
+              {
+                "path": "",
+                "as_binding": "bills",
+                "coerce": "string_list"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "for_each",
+            "over": "bills",
+            "as_binding": "bill",
+            "steps": [
+              {
+                "kind": "request",
+                "request": {
+                  "host": "api",
+                  "path": "/me/bill/{bill}",
+                  "method": "GET",
+                  "query": {},
+                  "headers": {},
+                  "body": null,
+                  "purpose": "bill"
+                },
+                "extract": [],
+                "stop_on_status_gte": 400
+              },
+              {
+                "kind": "request",
+                "request": {
+                  "host": "api",
+                  "path": "/me/bill/{bill}/details",
+                  "method": "GET",
+                  "query": {},
+                  "headers": {},
+                  "body": null,
+                  "purpose": "detail_ids"
+                },
+                "extract": [
+                  {
+                    "path": "",
+                    "as_binding": "details",
+                    "coerce": "string_list"
+                  }
+                ],
+                "stop_on_status_gte": 400
+              },
+              {
+                "kind": "for_each",
+                "over": "details",
+                "as_binding": "detail",
+                "steps": [
+                  {
+                    "kind": "request",
+                    "request": {
+                      "host": "api",
+                      "path": "/me/bill/{bill}/details/{detail}",
+                      "method": "GET",
+                      "query": {},
+                      "headers": {},
+                      "body": null,
+                      "purpose": "detail"
+                    },
+                    "extract": [],
+                    "stop_on_status_gte": 400
+                  }
+                ],
+                "max_items": 50
+              }
+            ],
+            "max_items": 50
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "WyJCMSIsIkIyIl0=",
+          "signature": "s"
+        },
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "eyJiaWxsSWQiOiJCMSJ9",
+          "signature": "s"
+        },
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "WyJEMSIsIkQyIl0=",
+          "signature": "s"
+        },
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "eyJkIjoxfQ==",
+          "signature": "s"
+        },
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "eyJkIjoyfQ==",
+          "signature": "s"
+        },
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "eyJiaWxsSWQiOiJCMiJ9",
+          "signature": "s"
+        },
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "WyJEMyJd",
+          "signature": "s"
+        },
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "eyJkIjozfQ==",
+          "signature": "s"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "GET",
+            "host": "api",
+            "path": "/me/bill",
+            "query": "date.from=2026-01-01",
+            "headers": {
+              "X-Auth": "a"
+            },
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          },
+          {
+            "method": "GET",
+            "host": "api",
+            "path": "/me/bill/B1",
+            "query": "",
+            "headers": {
+              "X-Auth": "a"
+            },
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          },
+          {
+            "method": "GET",
+            "host": "api",
+            "path": "/me/bill/B1/details",
+            "query": "",
+            "headers": {
+              "X-Auth": "a"
+            },
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          },
+          {
+            "method": "GET",
+            "host": "api",
+            "path": "/me/bill/B1/details/D1",
+            "query": "",
+            "headers": {
+              "X-Auth": "a"
+            },
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          },
+          {
+            "method": "GET",
+            "host": "api",
+            "path": "/me/bill/B1/details/D2",
+            "query": "",
+            "headers": {
+              "X-Auth": "a"
+            },
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          },
+          {
+            "method": "GET",
+            "host": "api",
+            "path": "/me/bill/B2",
+            "query": "",
+            "headers": {
+              "X-Auth": "a"
+            },
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          },
+          {
+            "method": "GET",
+            "host": "api",
+            "path": "/me/bill/B2/details",
+            "query": "",
+            "headers": {
+              "X-Auth": "a"
+            },
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          },
+          {
+            "method": "GET",
+            "host": "api",
+            "path": "/me/bill/B2/details/D3",
+            "query": "",
+            "headers": {
+              "X-Auth": "a"
+            },
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://api/me/bill?date.from=2026-01-01",
+            "request_purpose": "bill_ids",
+            "body_b64": "WyJCMSIsIkIyIl0=",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://api/me/bill/B1",
+            "request_purpose": "bill",
+            "body_b64": "eyJiaWxsSWQiOiJCMSJ9",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://api/me/bill/B1/details",
+            "request_purpose": "detail_ids",
+            "body_b64": "WyJEMSIsIkQyIl0=",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://api/me/bill/B1/details/D1",
+            "request_purpose": "detail",
+            "body_b64": "eyJkIjoxfQ==",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://api/me/bill/B1/details/D2",
+            "request_purpose": "detail",
+            "body_b64": "eyJkIjoyfQ==",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://api/me/bill/B2",
+            "request_purpose": "bill",
+            "body_b64": "eyJiaWxsSWQiOiJCMiJ9",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://api/me/bill/B2/details",
+            "request_purpose": "detail_ids",
+            "body_b64": "WyJEMyJd",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://api/me/bill/B2/details/D3",
+            "request_purpose": "detail",
+            "body_b64": "eyJkIjozfQ==",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "for-each-empty-list-runs-nothing",
+      "auth_headers": {
+        "X-Auth": "a"
+      },
+      "signing_token": "tok",
+      "program": {
+        "purpose": "bills",
+        "bindings": {
+          "since": "2026-01-01"
+        },
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "api",
+              "path": "/me/bill",
+              "method": "GET",
+              "query": {
+                "date.from": "{since}"
+              },
+              "headers": {},
+              "body": null,
+              "purpose": "bill_ids"
+            },
+            "extract": [
+              {
+                "path": "",
+                "as_binding": "bills",
+                "coerce": "string_list"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "for_each",
+            "over": "bills",
+            "as_binding": "bill",
+            "steps": [
+              {
+                "kind": "request",
+                "request": {
+                  "host": "api",
+                  "path": "/me/bill/{bill}",
+                  "method": "GET",
+                  "query": {},
+                  "headers": {},
+                  "body": null,
+                  "purpose": "bill"
+                },
+                "extract": [],
+                "stop_on_status_gte": 400
+              },
+              {
+                "kind": "request",
+                "request": {
+                  "host": "api",
+                  "path": "/me/bill/{bill}/details",
+                  "method": "GET",
+                  "query": {},
+                  "headers": {},
+                  "body": null,
+                  "purpose": "detail_ids"
+                },
+                "extract": [
+                  {
+                    "path": "",
+                    "as_binding": "details",
+                    "coerce": "string_list"
+                  }
+                ],
+                "stop_on_status_gte": 400
+              },
+              {
+                "kind": "for_each",
+                "over": "details",
+                "as_binding": "detail",
+                "steps": [
+                  {
+                    "kind": "request",
+                    "request": {
+                      "host": "api",
+                      "path": "/me/bill/{bill}/details/{detail}",
+                      "method": "GET",
+                      "query": {},
+                      "headers": {},
+                      "body": null,
+                      "purpose": "detail"
+                    },
+                    "extract": [],
+                    "stop_on_status_gte": 400
+                  }
+                ],
+                "max_items": 50
+              }
+            ],
+            "max_items": 50
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "W10=",
+          "signature": "s"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "GET",
+            "host": "api",
+            "path": "/me/bill",
+            "query": "date.from=2026-01-01",
+            "headers": {
+              "X-Auth": "a"
+            },
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://api/me/bill?date.from=2026-01-01",
+            "request_purpose": "bill_ids",
+            "body_b64": "W10=",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "for-each-absent-path-is-empty-list",
+      "auth_headers": {
+        "X-Auth": "a"
+      },
+      "signing_token": "tok",
+      "program": {
+        "purpose": "bills",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "api",
+              "path": "/me/bill",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "bill_ids"
+            },
+            "extract": [
+              {
+                "path": "items",
+                "as_binding": "bills",
+                "coerce": "string_list"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "for_each",
+            "over": "bills",
+            "as_binding": "bill",
+            "steps": [
+              {
+                "kind": "request",
+                "request": {
+                  "host": "api",
+                  "path": "/me/bill/{bill}",
+                  "method": "GET",
+                  "query": {},
+                  "headers": {},
+                  "body": null,
+                  "purpose": "bill"
+                },
+                "extract": [],
+                "stop_on_status_gte": 400
+              }
+            ],
+            "max_items": 50
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "eyJvdGhlciI6MX0=",
+          "signature": "s"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "GET",
+            "host": "api",
+            "path": "/me/bill",
+            "query": "",
+            "headers": {
+              "X-Auth": "a"
+            },
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://api/me/bill",
+            "request_purpose": "bill_ids",
+            "body_b64": "eyJvdGhlciI6MX0=",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "for-each-over-max-items",
+      "auth_headers": {
+        "X-Auth": "a"
+      },
+      "signing_token": "tok",
+      "program": {
+        "purpose": "bills",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "api",
+              "path": "/me/bill",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "bill_ids"
+            },
+            "extract": [
+              {
+                "path": "",
+                "as_binding": "bills",
+                "coerce": "string_list"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "for_each",
+            "over": "bills",
+            "as_binding": "bill",
+            "steps": [
+              {
+                "kind": "request",
+                "request": {
+                  "host": "api",
+                  "path": "/me/bill/{bill}",
+                  "method": "GET",
+                  "query": {},
+                  "headers": {},
+                  "body": null,
+                  "purpose": "bill"
+                },
+                "extract": [],
+                "stop_on_status_gte": 400
+              }
+            ],
+            "max_items": 2
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "WyJCMSIsIkIyIiwiQjMiXQ==",
+          "signature": "s"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "GET",
+            "host": "api",
+            "path": "/me/bill",
+            "query": "",
+            "headers": {
+              "X-Auth": "a"
+            },
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://api/me/bill",
+            "request_purpose": "bill_ids",
+            "body_b64": "WyJCMSIsIkIyIiwiQjMiXQ==",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "provider_error",
+            "status": 502,
+            "error": "for_each: 3 items exceed max_items 2",
+            "synthetic": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "for-each-unsafe-item-refused",
+      "auth_headers": {
+        "X-Auth": "a"
+      },
+      "signing_token": "tok",
+      "program": {
+        "purpose": "bills",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "api",
+              "path": "/me/bill",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "bill_ids"
+            },
+            "extract": [
+              {
+                "path": "",
+                "as_binding": "bills",
+                "coerce": "string_list"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "for_each",
+            "over": "bills",
+            "as_binding": "bill",
+            "steps": [
+              {
+                "kind": "request",
+                "request": {
+                  "host": "api",
+                  "path": "/me/bill/{bill}",
+                  "method": "GET",
+                  "query": {},
+                  "headers": {},
+                  "body": null,
+                  "purpose": "bill"
+                },
+                "extract": [],
+                "stop_on_status_gte": 400
+              }
+            ],
+            "max_items": 50
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "WyJCMSIsIi4uL21lL2FwaSJd",
+          "signature": "s"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "GET",
+            "host": "api",
+            "path": "/me/bill",
+            "query": "",
+            "headers": {
+              "X-Auth": "a"
+            },
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://api/me/bill",
+            "request_purpose": "bill_ids",
+            "body_b64": "WyJCMSIsIi4uL21lL2FwaSJd",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "provider_error",
+            "status": 502,
+            "error": "extract: list is not an array of safe path values",
+            "synthetic": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "for-each-non-string-item-refused",
+      "auth_headers": {
+        "X-Auth": "a"
+      },
+      "signing_token": "tok",
+      "program": {
+        "purpose": "bills",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "api",
+              "path": "/me/bill",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "bill_ids"
+            },
+            "extract": [
+              {
+                "path": "",
+                "as_binding": "bills",
+                "coerce": "string_list"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "for_each",
+            "over": "bills",
+            "as_binding": "bill",
+            "steps": [
+              {
+                "kind": "request",
+                "request": {
+                  "host": "api",
+                  "path": "/me/bill/{bill}",
+                  "method": "GET",
+                  "query": {},
+                  "headers": {},
+                  "body": null,
+                  "purpose": "bill"
+                },
+                "extract": [],
+                "stop_on_status_gte": 400
+              }
+            ],
+            "max_items": 50
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "WyJCMSIsN10=",
+          "signature": "s"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "GET",
+            "host": "api",
+            "path": "/me/bill",
+            "query": "",
+            "headers": {
+              "X-Auth": "a"
+            },
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://api/me/bill",
+            "request_purpose": "bill_ids",
+            "body_b64": "WyJCMSIsN10=",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "provider_error",
+            "status": 502,
+            "error": "extract: list is not an array of safe path values",
+            "synthetic": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "for-each-not-a-list-refused",
+      "auth_headers": {
+        "X-Auth": "a"
+      },
+      "signing_token": "tok",
+      "program": {
+        "purpose": "bills",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "api",
+              "path": "/me/bill",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "bill_ids"
+            },
+            "extract": [
+              {
+                "path": "",
+                "as_binding": "bills",
+                "coerce": "string_list"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "for_each",
+            "over": "bills",
+            "as_binding": "bill",
+            "steps": [
+              {
+                "kind": "request",
+                "request": {
+                  "host": "api",
+                  "path": "/me/bill/{bill}",
+                  "method": "GET",
+                  "query": {},
+                  "headers": {},
+                  "body": null,
+                  "purpose": "bill"
+                },
+                "extract": [],
+                "stop_on_status_gte": 400
+              }
+            ],
+            "max_items": 50
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "eyJCMSI6MX0=",
+          "signature": "s"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "GET",
+            "host": "api",
+            "path": "/me/bill",
+            "query": "",
+            "headers": {
+              "X-Auth": "a"
+            },
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://api/me/bill",
+            "request_purpose": "bill_ids",
+            "body_b64": "eyJCMSI6MX0=",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "provider_error",
+            "status": 502,
+            "error": "extract: list is not an array of safe path values",
+            "synthetic": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "for-each-missing-list-binding",
+      "auth_headers": {
+        "X-Auth": "a"
+      },
+      "signing_token": "tok",
+      "program": {
+        "purpose": "bills",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "for_each",
+            "over": "never",
+            "as_binding": "bill",
+            "steps": [
+              {
+                "kind": "request",
+                "request": {
+                  "host": "api",
+                  "path": "/me/bill/{bill}",
+                  "method": "GET",
+                  "query": {},
+                  "headers": {},
+                  "body": null,
+                  "purpose": "bill"
+                },
+                "extract": [],
+                "stop_on_status_gte": 400
+              }
+            ],
+            "max_items": 50
+          }
+        ]
+      },
+      "broker_script": [],
+      "expect": {
+        "requests": [],
+        "responses": [
+          {
+            "kind": "provider_error",
+            "status": 502,
+            "error": "for_each: list binding missing: never",
+            "synthetic": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "for-each-iteration-scope-isolated",
+      "auth_headers": {
+        "X-Auth": "a"
+      },
+      "signing_token": "tok",
+      "program": {
+        "purpose": "bills",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "api",
+              "path": "/me/bill",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "bill_ids"
+            },
+            "extract": [
+              {
+                "path": "",
+                "as_binding": "bills",
+                "coerce": "string_list"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "for_each",
+            "over": "bills",
+            "as_binding": "bill",
+            "steps": [
+              {
+                "kind": "request",
+                "request": {
+                  "host": "api",
+                  "path": "/me/bill/{bill}",
+                  "method": "GET",
+                  "query": {
+                    "after": "{cursor}"
+                  },
+                  "headers": {},
+                  "body": null,
+                  "purpose": "bill"
+                },
+                "extract": [
+                  {
+                    "path": "cursor",
+                    "as_binding": "cursor",
+                    "coerce": "string"
+                  }
+                ],
+                "stop_on_status_gte": 400
+              }
+            ],
+            "max_items": 50
+          },
+          {
+            "kind": "request",
+            "request": {
+              "host": "api",
+              "path": "/me/after",
+              "method": "GET",
+              "query": {
+                "after": "{cursor}"
+              },
+              "headers": {},
+              "body": null,
+              "purpose": "after"
+            },
+            "extract": [],
+            "stop_on_status_gte": 400
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "WyJCMSIsIkIyIl0=",
+          "signature": "s"
+        },
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "eyJjdXJzb3IiOiJjMSJ9",
+          "signature": "s"
+        },
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "e30=",
+          "signature": "s"
+        },
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "e30=",
+          "signature": "s"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "GET",
+            "host": "api",
+            "path": "/me/bill",
+            "query": "",
+            "headers": {
+              "X-Auth": "a"
+            },
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          },
+          {
+            "method": "GET",
+            "host": "api",
+            "path": "/me/bill/B1",
+            "query": "",
+            "headers": {
+              "X-Auth": "a"
+            },
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          },
+          {
+            "method": "GET",
+            "host": "api",
+            "path": "/me/bill/B2",
+            "query": "",
+            "headers": {
+              "X-Auth": "a"
+            },
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          },
+          {
+            "method": "GET",
+            "host": "api",
+            "path": "/me/after",
+            "query": "",
+            "headers": {
+              "X-Auth": "a"
+            },
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://api/me/bill",
+            "request_purpose": "bill_ids",
+            "body_b64": "WyJCMSIsIkIyIl0=",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://api/me/bill/B1",
+            "request_purpose": "bill",
+            "body_b64": "eyJjdXJzb3IiOiJjMSJ9",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://api/me/bill/B2",
+            "request_purpose": "bill",
+            "body_b64": "e30=",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://api/me/after",
+            "request_purpose": "after",
+            "body_b64": "e30=",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "for-each-error-inside-loop-stops-program",
+      "auth_headers": {
+        "X-Auth": "a"
+      },
+      "signing_token": "tok",
+      "program": {
+        "purpose": "bills",
+        "bindings": {
+          "since": "2026-01-01"
+        },
+        "steps": [
+          {
+            "kind": "request",
+            "request": {
+              "host": "api",
+              "path": "/me/bill",
+              "method": "GET",
+              "query": {
+                "date.from": "{since}"
+              },
+              "headers": {},
+              "body": null,
+              "purpose": "bill_ids"
+            },
+            "extract": [
+              {
+                "path": "",
+                "as_binding": "bills",
+                "coerce": "string_list"
+              }
+            ],
+            "stop_on_status_gte": 400
+          },
+          {
+            "kind": "for_each",
+            "over": "bills",
+            "as_binding": "bill",
+            "steps": [
+              {
+                "kind": "request",
+                "request": {
+                  "host": "api",
+                  "path": "/me/bill/{bill}",
+                  "method": "GET",
+                  "query": {},
+                  "headers": {},
+                  "body": null,
+                  "purpose": "bill"
+                },
+                "extract": [],
+                "stop_on_status_gte": 400
+              },
+              {
+                "kind": "request",
+                "request": {
+                  "host": "api",
+                  "path": "/me/bill/{bill}/details",
+                  "method": "GET",
+                  "query": {},
+                  "headers": {},
+                  "body": null,
+                  "purpose": "detail_ids"
+                },
+                "extract": [
+                  {
+                    "path": "",
+                    "as_binding": "details",
+                    "coerce": "string_list"
+                  }
+                ],
+                "stop_on_status_gte": 400
+              },
+              {
+                "kind": "for_each",
+                "over": "details",
+                "as_binding": "detail",
+                "steps": [
+                  {
+                    "kind": "request",
+                    "request": {
+                      "host": "api",
+                      "path": "/me/bill/{bill}/details/{detail}",
+                      "method": "GET",
+                      "query": {},
+                      "headers": {},
+                      "body": null,
+                      "purpose": "detail"
+                    },
+                    "extract": [],
+                    "stop_on_status_gte": 400
+                  }
+                ],
+                "max_items": 50
+              }
+            ],
+            "max_items": 50
+          }
+        ]
+      },
+      "broker_script": [
+        {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "WyJCMSIsIkIyIl0=",
+          "signature": "s"
+        },
+        {
+          "status": 403,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body_b64": "eyJlcnJvciI6IngifQ==",
+          "signature": "s"
+        }
+      ],
+      "expect": {
+        "requests": [
+          {
+            "method": "GET",
+            "host": "api",
+            "path": "/me/bill",
+            "query": "date.from=2026-01-01",
+            "headers": {
+              "X-Auth": "a"
+            },
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          },
+          {
+            "method": "GET",
+            "host": "api",
+            "path": "/me/bill/B1",
+            "query": "",
+            "headers": {
+              "X-Auth": "a"
+            },
+            "body": null,
+            "signing_token": "tok",
+            "req_sig": null
+          }
+        ],
+        "responses": [
+          {
+            "kind": "relayed",
+            "status": 200,
+            "request_url": "https://api/me/bill?date.from=2026-01-01",
+            "request_purpose": "bill_ids",
+            "body_b64": "WyJCMSIsIkIyIl0=",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          },
+          {
+            "kind": "relayed",
+            "status": 403,
+            "request_url": "https://api/me/bill/B1",
+            "request_purpose": "bill",
+            "body_b64": "eyJlcnJvciI6IngifQ==",
+            "signature": "s",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "synthetic": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "unsupported-step-kind-refused",
+      "auth_headers": {
+        "X-Auth": "a"
+      },
+      "signing_token": "tok",
+      "program": {
+        "purpose": "bills",
+        "bindings": {},
+        "steps": [
+          {
+            "kind": "mystery",
+            "request": {
+              "host": "api",
+              "path": "/x",
+              "method": "GET",
+              "query": {},
+              "headers": {},
+              "body": null,
+              "purpose": "bills"
+            }
+          }
+        ]
+      },
+      "broker_script": [],
+      "expect": {
+        "requests": [],
+        "responses": [
+          {
+            "kind": "provider_error",
+            "status": 502,
+            "error": "unsupported step kind: mystery",
+            "synthetic": false
+          }
+        ]
+      }
     }
   ]
 }

@@ -7,11 +7,18 @@
 # See "Three relay implementations" in that repo's root CLAUDE.md;
 # `make lockstep` there enumerates the whole set across both repos.
 
-"""Per-request auth-header overlay for a FetchPlan.
+"""Request signers for a FetchPlan.
 
-When ``signed_auth`` is present the named signer owns every auth
-header (bearer path skipped); otherwise the plan's ``auth_header``
-carries the raw key (with an optional ``auth_scheme`` prefix).
+``build_plan_signer`` turns a plan into a signer that every forward calls
+with the broker target and body it is about to send. When ``signed_auth``
+is present the named signer owns every auth header (bearer path skipped);
+otherwise the plan's ``auth_header`` carries the raw key (with an optional
+``auth_scheme`` prefix).
+
+Bearer and ``qc_hmac_v1`` don't depend on the request, so their headers
+are computed once per plan. ``ovh_v1`` signs the method, URL and body, so
+it signs every request — and every retry, so a retry issued minutes later
+still carries a fresh timestamp.
 """
 
 from __future__ import annotations
@@ -19,31 +26,59 @@ from __future__ import annotations
 import base64
 import hashlib
 import time
+from collections.abc import Callable
 from typing import Any
+
+#: ``(target, body_b64) -> headers`` for one outbound request.
+RequestSigner = Callable[[dict[str, Any], "str | None"], dict[str, str]]
+
+_OVH_CREDENTIAL_ERROR = "ovh_v1 credential must be 'application_secret:consumer_key'"
 
 
 def build_auth_header_value(scheme: str | None, api_key: str) -> str:
     return f"{scheme} {api_key}" if scheme else api_key
 
 
-def build_plan_headers(
-    plan: dict[str, Any], api_key: str, now_sec: int | None = None
-) -> dict[str, str]:
+def fixed_headers_signer(headers: dict[str, str]) -> RequestSigner:
+    """A signer whose headers don't depend on the request."""
+    return lambda _target, _body: headers
+
+
+def build_plan_signer(
+    plan: dict[str, Any], api_key: str, plan_received_at_sec: int | None = None
+) -> RequestSigner:
+    """``plan_received_at_sec`` is the local unix time the plan arrived from
+    the App Server; ``ovh_v1`` turns the plan's ``server_now`` into a clock
+    offset against it. Defaults to now, right for a caller that signs as soon
+    as it has the plan."""
     signed = plan.get("signed_auth")
-    if signed:
-        return _sign_signed_auth(signed, api_key, now_sec)
-    return {
-        plan["auth_header"]: build_auth_header_value(plan.get("auth_scheme"), api_key)
-    }
-
-
-def _sign_signed_auth(
-    spec: dict[str, Any], api_key: str, now_sec: int | None
-) -> dict[str, str]:
-    kind = spec.get("kind")
+    if not signed:
+        return fixed_headers_signer(
+            {
+                plan["auth_header"]: build_auth_header_value(
+                    plan.get("auth_scheme"), api_key
+                )
+            }
+        )
+    kind = signed.get("kind")
     if kind == "qc_hmac_v1":
-        return sign_quantconnect_hmac_v1(spec, api_key, now_sec)
+        # One timestamp covers the whole plan (v1's ``_headers()`` behaviour).
+        return fixed_headers_signer(sign_quantconnect_hmac_v1(signed, api_key))
+    if kind == "ovh_v1":
+        # Reject a malformed credential now, before any request is built.
+        _split_ovh_credential(api_key)
+        received = (
+            plan_received_at_sec if plan_received_at_sec is not None else _now_sec()
+        )
+        offset = int(signed["server_now"]) - received
+        return lambda target, body: sign_ovh_v1(
+            signed, api_key, target, body, _now_sec() + offset
+        )
     raise ValueError(f"unsupported signed_auth kind: {kind!r}")
+
+
+def _now_sec() -> int:
+    return int(time.time())
 
 
 def sign_quantconnect_hmac_v1(
@@ -57,3 +92,39 @@ def sign_quantconnect_hmac_v1(
     scheme = spec.get("authorization_scheme", "Basic")
     ts_header = spec.get("timestamp_header", "Timestamp")
     return {auth_header: f"{scheme} {auth}", ts_header: timestamp}
+
+
+def sign_ovh_v1(
+    spec: dict[str, Any],
+    credential: str,
+    target: dict[str, Any],
+    body: str | None,
+    timestamp_sec: int,
+) -> dict[str, str]:
+    """OVHcloud: ``"$1$" + sha1hex(AS+CK+METHOD+URL+BODY+ts)``, ``+``-joined.
+
+    ``URL`` is rebuilt from the broker target exactly as the broker rebuilds
+    the upstream URL; ``BODY`` is the raw request bytes. ``credential`` is
+    the vault secret ``AS:CK``, split on the first ``:``."""
+    app_secret, consumer_key = _split_ovh_credential(credential)
+    timestamp = str(timestamp_sec)
+    query = target.get("query")
+    url = f"https://{target['host']}{target['path']}" + (f"?{query}" if query else "")
+    head = "+".join([app_secret, consumer_key, target["method"], url, ""]).encode()
+    material = (
+        head + (base64.b64decode(body) if body else b"") + f"+{timestamp}".encode()
+    )
+    return {
+        "X-Ovh-Application": spec["application_key"],
+        "X-Ovh-Consumer": consumer_key,
+        "X-Ovh-Timestamp": timestamp,
+        "X-Ovh-Signature": "$1$" + hashlib.sha1(material).hexdigest(),
+    }
+
+
+def _split_ovh_credential(credential: str) -> tuple[str, str]:
+    app_secret, sep, consumer_key = credential.partition(":")
+    if not sep or not app_secret or not consumer_key:
+        # Never echo the credential: the message names the shape only.
+        raise ValueError(_OVH_CREDENTIAL_ERROR)
+    return app_secret, consumer_key

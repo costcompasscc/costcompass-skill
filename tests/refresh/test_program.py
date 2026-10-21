@@ -7,6 +7,7 @@ import pytest
 
 from costcompass.refresh import program
 from costcompass.refresh.broker import BrokerForwardCapError
+from costcompass.refresh.signers import fixed_headers_signer
 
 
 class FakeBroker:
@@ -20,6 +21,9 @@ class FakeBroker:
         if isinstance(r, Exception):
             raise r
         return r
+
+
+NO_AUTH = fixed_headers_signer({})
 
 
 def env(status, obj):
@@ -83,7 +87,10 @@ def test_request_then_poll_loop():
         ]
     )
     out = program.run_program(
-        _bq_program(), {"Authorization": "Bearer t"}, "tok", broker
+        _bq_program(),
+        fixed_headers_signer({"Authorization": "Bearer t"}),
+        "tok",
+        broker,
     )
     assert len(out) == 3
     # jobId substituted into the poll path
@@ -97,14 +104,14 @@ def test_request_then_poll_loop():
 
 def test_stop_on_status_terminates_without_extract():
     broker = FakeBroker([env(500, {"jobId": "abc"})])
-    out = program.run_program(_bq_program(), {}, "tok", broker)
+    out = program.run_program(_bq_program(), NO_AUTH, "tok", broker)
     assert len(out) == 1  # poll step never runs
     assert out[0]["status"] == 500
 
 
 def test_path_traversal_guard():
     broker = FakeBroker([env(200, {"jobId": "../evil"})])
-    out = program.run_program(_bq_program(), {}, "tok", broker)
+    out = program.run_program(_bq_program(), NO_AUTH, "tok", broker)
     assert out[-1]["status"] == 502
     assert out[-1]["request_url"] == "cc-internal://cli-refresh"
 
@@ -113,7 +120,7 @@ def test_poll_deadline_emits_504():
     clock_values = iter([0.0, 100_000.0, 200_000.0])
     broker = FakeBroker([env(200, {"jobId": "abc"})])
     out = program.run_program(
-        _bq_program(), {}, "tok", broker, now=lambda: next(clock_values)
+        _bq_program(), NO_AUTH, "tok", broker, now=lambda: next(clock_values)
     )
     assert out[-1]["status"] == 504
     assert "deadline" in json.loads(base64.b64decode(out[-1]["body_b64"]))["error"]
@@ -122,7 +129,7 @@ def test_poll_deadline_emits_504():
 def test_forward_cap_propagates():
     broker = FakeBroker([BrokerForwardCapError(100, 100)])
     with pytest.raises(BrokerForwardCapError):
-        program.run_program(_bq_program(), {}, "tok", broker)
+        program.run_program(_bq_program(), NO_AUTH, "tok", broker)
 
 
 def test_js_string_coercion_matches_browser():
@@ -161,6 +168,15 @@ def test_js_string_matches_browser_number_notation():
     assert program._js_string(1.2345678901234568e20) == "123456789012345680000"
 
 
+def _extract(rules, body_b64, bindings):
+    """``_apply_extract`` over string bindings only: True when it succeeded.
+    The scope shares ``bindings``, so writes show up in the caller's dict."""
+    return (
+        program._apply_extract(rules, body_b64, program._Scope(strings=bindings))
+        == "ok"
+    )
+
+
 def test_non_standard_json_constants_make_the_body_unparseable():
     # CPython's json accepts bare Infinity/-Infinity/NaN; JSON.parse rejects
     # them, so the browser reference falls into its catch. Match it, rather
@@ -169,7 +185,7 @@ def test_non_standard_json_constants_make_the_body_unparseable():
     for literal in ("Infinity", "-Infinity", "NaN"):
         bindings: dict[str, str] = {}
         body = base64.b64encode(f'{{"n": {literal}, "jobId": "abc"}}'.encode()).decode()
-        ok = program._apply_extract(
+        ok = _extract(
             [
                 {"path": "n", "as_binding": "n"},
                 {"path": "jobId", "as_binding": "jobId"},
@@ -186,7 +202,7 @@ def test_non_standard_json_constants_make_the_body_unparseable():
 def test_apply_extract_leaves_bindings_untouched_on_a_non_json_body():
     bindings = {"prior": "kept"}
     body = base64.b64encode(b"<html>not json</html>").decode()
-    ok = program._apply_extract([{"path": "a", "as_binding": "a"}], body, bindings)
+    ok = _extract([{"path": "a", "as_binding": "a"}], body, bindings)
     assert ok is False
     assert bindings == {"prior": "kept"}
 
@@ -194,7 +210,7 @@ def test_apply_extract_leaves_bindings_untouched_on_a_non_json_body():
 def test_apply_extract_with_no_rules_tolerates_a_non_json_body():
     bindings: dict[str, str] = {}
     body = base64.b64encode(b"<html>not json</html>").decode()
-    assert program._apply_extract([], body, bindings) is True
+    assert _extract([], body, bindings) is True
     assert bindings == {}
 
 
@@ -236,7 +252,7 @@ OUTSIDE_THE_DECODE_CONTRACT = [
 @pytest.mark.parametrize("body,why", OUTSIDE_THE_DECODE_CONTRACT)
 def test_apply_extract_refuses_bodies_outside_the_decode_contract(body, why):
     bindings = {"prior": "kept"}
-    ok = program._apply_extract([{"path": "a", "as_binding": "a"}], body, bindings)
+    ok = _extract([{"path": "a", "as_binding": "a"}], body, bindings)
     assert ok is False, why
     assert bindings == {"prior": "kept"}, why  # untouched, as on any decode failure
 
@@ -247,7 +263,7 @@ def test_apply_extract_accepts_the_one_canonical_spelling():
     # `b64decode(validate=True)` accepts. Guards against "fixing" the
     # divergence by making everything fail.
     bindings: dict[str, str] = {}
-    assert program._apply_extract([{"path": "a", "as_binding": "a"}], "e30=", bindings)
+    assert _extract([{"path": "a", "as_binding": "a"}], "e30=", bindings)
     assert bindings == {"a": ""}  # absent path binds "", which is not a failure
 
 
@@ -258,7 +274,7 @@ def test_apply_extract_refuses_a_body_past_the_depth_cap_without_crashing():
     # That this merely returns False is the whole point of the test.
     deep = base64.b64encode(b"[" * 50_000 + b"]" * 50_000).decode()
     bindings: dict[str, str] = {}
-    ok = program._apply_extract([{"path": "a", "as_binding": "a"}], deep, bindings)
+    ok = _extract([{"path": "a", "as_binding": "a"}], deep, bindings)
     assert ok is False
     assert bindings == {}
 
@@ -269,7 +285,7 @@ def test_depth_scan_does_not_count_brackets_inside_a_string():
     # own outage.
     noisy = base64.b64encode(json.dumps({"a": "[" * 200}).encode()).decode()
     bindings: dict[str, str] = {}
-    assert program._apply_extract([{"path": "a", "as_binding": "a"}], noisy, bindings)
+    assert _extract([{"path": "a", "as_binding": "a"}], noisy, bindings)
     assert bindings == {"a": "[" * 200}
 
 
@@ -278,9 +294,7 @@ def test_apply_extract_binds_empty_for_an_absent_path():
     # absent on the last page. Only an unreadable BODY is an error.
     bindings: dict[str, str] = {}
     body = base64.b64encode(b'{"present": "x"}').decode()
-    ok = program._apply_extract(
-        [{"path": "pageToken", "as_binding": "page"}], body, bindings
-    )
+    ok = _extract([{"path": "pageToken", "as_binding": "page"}], body, bindings)
     assert ok is True
     assert bindings == {"page": ""}
 
@@ -322,7 +336,7 @@ def _error_detail(resp):
 def test_require_binding_missing_emits_502_and_never_forwards():
     broker = FakeBroker([])  # any forward would raise
     out = program.run_program(
-        _poll_only_program({"more": "true"}, ["cursor"]), {}, "tok", broker
+        _poll_only_program({"more": "true"}, ["cursor"]), NO_AUTH, "tok", broker
     )
     assert broker.requests == []
     assert len(out) == 1
@@ -336,7 +350,7 @@ def test_require_binding_names_the_first_missing_in_declaration_order():
     broker = FakeBroker([])
     out = program.run_program(
         _poll_only_program({"more": "true", "b": "set"}, ["a", "b", "c"]),
-        {},
+        NO_AUTH,
         "tok",
         broker,
     )
@@ -354,7 +368,7 @@ def test_require_binding_cleared_mid_loop_still_emits_502():
     )
     out = program.run_program(
         _poll_only_program({"more": "true", "cursor": "p1"}, ["cursor"]),
-        {},
+        NO_AUTH,
         "tok",
         broker,
     )
@@ -407,7 +421,7 @@ def test_undecodable_body_emits_502_and_terminates_before_the_next_step():
             }
         ]
     )
-    out = program.run_program(prog, {}, "tok", broker)
+    out = program.run_program(prog, NO_AUTH, "tok", broker)
 
     assert len(broker.requests) == 1  # the second step never ran
     assert len(out) == 2  # the relayed 200, then the error
@@ -424,7 +438,7 @@ def test_exponent_overflow_matches_browser_infinity():
     # 'Infinity'. The Swift port agrees via its own overflow-to-infinity.
     bindings: dict[str, str] = {}
     body = base64.b64encode(b'{"big": 1e400, "small": -1e400}').decode()
-    program._apply_extract(
+    _extract(
         [
             {"path": "big", "as_binding": "big"},
             {"path": "small", "as_binding": "small"},
@@ -439,3 +453,23 @@ def test_js_number_string_non_finite_spellings():
     assert program._js_number_string(float("inf")) == "Infinity"
     assert program._js_number_string(float("-inf")) == "-Infinity"
     assert program._js_number_string(float("nan")) == "NaN"
+
+
+def test_string_list_extract_binds_a_list_from_the_whole_body():
+    scope = program._Scope(strings={})
+    body = base64.b64encode(b'["B1", "B-2.x"]').decode()
+    rules = [{"path": "", "as_binding": "bills", "coerce": "string_list"}]
+    assert program._apply_extract(rules, body, scope) == "ok"
+    assert scope.lists == {"bills": ["B1", "B-2.x"]}
+    assert scope.strings == {}
+
+
+@pytest.mark.parametrize(
+    "items",
+    [b'["B1", "../x"]', b'["B1", 7]', b'["B1", ""]', b'["a/b"]', b'{"B1": 1}', b'"B1"'],
+)
+def test_string_list_extract_refuses_anything_but_safe_ids(items):
+    scope = program._Scope(strings={})
+    body = base64.b64encode(items).decode()
+    rules = [{"path": "", "as_binding": "bills", "coerce": "string_list"}]
+    assert program._apply_extract(rules, body, scope) == "bad_list"

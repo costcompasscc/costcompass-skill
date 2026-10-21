@@ -102,9 +102,18 @@ _SIGNERS = _load("signers.json")
 @pytest.mark.parametrize("vec", _SIGNERS, ids=_ids(_SIGNERS))
 def test_signer_vector(vec: dict) -> None:
     spec = vec["input"]
-    headers = signers.sign_quantconnect_hmac_v1(
-        spec, spec["api_token"], now_sec=spec["now_sec"]
-    )
+    if spec["kind"] == "ovh_v1":
+        headers = signers.sign_ovh_v1(
+            spec,
+            spec["credential"],
+            spec["target"],
+            spec["body"],
+            spec["timestamp_sec"],
+        )
+    else:
+        headers = signers.sign_quantconnect_hmac_v1(
+            spec, spec["api_token"], now_sec=spec["now_sec"]
+        )
     assert headers == vec["expect"]
 
 
@@ -216,7 +225,7 @@ def test_program_vector(vec: dict) -> None:
     broker = _CapturingBroker(vec["broker_script"])
     out = program_mod.run_program(
         vec["program"],
-        vec["auth_headers"],
+        signers.fixed_headers_signer(vec["auth_headers"]),
         vec.get("signing_token"),
         broker,
         now=_clock(vec),

@@ -13,7 +13,7 @@
 The CLI authenticates to the broker with its programmatic API key
 (Authorization: Bearer); the broker validates it via the App Server's
 whoami and never forwards it upstream (the provider auth comes only
-from the plan's auth overlay).
+from the plan's request signer).
 
 Body fields on request and response are base64-encoded raw bytes; the
 broker's response signature is relayed verbatim and never inspected.
@@ -32,6 +32,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from .. import user_agent
+from .signers import RequestSigner
 
 FORWARD_CAP = 100
 
@@ -271,13 +272,19 @@ def parse_broker_target(url: str, method: str) -> dict[str, str]:
 
 def build_forward_request(
     req: dict[str, Any],
-    auth_headers: dict[str, str],
+    sign: RequestSigner,
     signing_token: str | None,
 ) -> dict[str, Any]:
+    """One broker forward for a plan request. Call once per ATTEMPT: a signer
+    that covers the request stamps a fresh timestamp each time. The signer
+    sees the broker target — what the broker rebuilds the upstream URL from,
+    so what a provider that signs the URL verifies against."""
+    target = parse_broker_target(req["url"], req.get("method", "GET"))
+    body = req.get("body")
     return {
-        "target": parse_broker_target(req["url"], req.get("method", "GET")),
-        "headers": {**(req.get("headers") or {}), **auth_headers},
-        "body": req.get("body"),
+        "target": target,
+        "headers": {**(req.get("headers") or {}), **sign(target, body)},
+        "body": body,
         "signing_token": signing_token,
         "req_sig": req.get("req_sig"),
     }
@@ -390,7 +397,7 @@ class BrokerClient:
 
     def forward_with_retry(
         self,
-        request: dict[str, Any],
+        build_request: Callable[[], dict[str, Any]],
         *,
         can_wait: Callable[[float], bool] | None = None,
     ) -> dict[str, Any]:
@@ -417,11 +424,17 @@ class BrokerClient:
         A clock is deliberately NOT injected here to compute that itself: the
         orchestrator owns the run's wall clock (see ``RUN_BUDGET_S``), and a
         second clock in this client is a second thing to keep in agreement with
-        it. Default ``None`` keeps the pre-budget behaviour exactly."""
+        it. Default ``None`` keeps the pre-budget behaviour exactly.
+
+        ``build_request`` is called once per attempt (see ``build_forward_request``)."""
         attempt = 0
         last_error: BrokerError | None = None
         while attempt < self._retry_attempts:
-            req = request if attempt == 0 else {**request, "is_retry": True}
+            # Built per attempt so a request-covering signer re-signs it: a
+            # retry can go out minutes after the first try.
+            req = build_request()
+            if attempt > 0:
+                req = {**req, "is_retry": True}
             try:
                 envelope = self.forward(req)
             except BrokerForwardCapError:
@@ -452,7 +465,7 @@ class BrokerClient:
         # checker and guards a degenerate retry_attempts.
         if last_error is not None:
             raise last_error
-        return self.forward(request)
+        return self.forward(build_request())
 
     def _check_cap(self, request: dict[str, Any]) -> None:
         token = request.get("signing_token")

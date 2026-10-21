@@ -29,6 +29,7 @@ import json
 import re
 import time
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlencode
 
@@ -40,6 +41,7 @@ from .broker import (
     provider_error_response,
     to_raw_response_payload,
 )
+from .signers import RequestSigner
 
 _TOKEN_RE = re.compile(r"\{([^}]+)\}")
 _PATH_VALUE_CHARSET = re.compile(r"^[A-Za-z0-9._-]*$")
@@ -90,55 +92,117 @@ def _now_ms() -> float:
     return time.monotonic() * 1000.0
 
 
+@dataclass
+class _Scope:
+    """What the steps read and write: string bindings (substitution, loop
+    conditions) and list bindings (what a ``for_each`` walks). A for-each
+    iteration runs in a COPY, so anything its steps extract is gone when the
+    iteration ends — one invoice's line ids never reach the next invoice."""
+
+    strings: dict[str, str]
+    lists: dict[str, list[str]] = field(default_factory=dict)
+
+
+@dataclass
+class _Ctx:
+    """Everything a step needs that does not change while the program runs."""
+
+    sign: RequestSigner
+    signing_token: str | None
+    broker_client: BrokerClient
+    program: dict[str, Any]
+    out: list[dict[str, Any]]
+    now: Clock
+
+
 def run_program(
     program: dict[str, Any],
-    auth_headers: dict[str, str],
+    sign: RequestSigner,
     signing_token: str | None,
     broker_client: BrokerClient,
     now: Clock = _now_ms,
 ) -> list[dict[str, Any]]:
-    bindings: dict[str, str] = dict(program.get("bindings") or {})
-    out: list[dict[str, Any]] = []
-    for step in program.get("steps", []):
-        if step.get("kind") == "request":
-            outcome = _run_request_step(
-                step, bindings, auth_headers, signing_token, broker_client, program, out
-            )
+    scope = _Scope(strings=dict(program.get("bindings") or {}))
+    ctx = _Ctx(sign, signing_token, broker_client, program, [], now)
+    _run_steps(program.get("steps", []), scope, ctx)
+    return ctx.out
+
+
+def _run_steps(steps: list[dict[str, Any]], scope: _Scope, ctx: _Ctx) -> str:
+    """Walk ``steps`` in order; stop at the first that ends the program."""
+    for step in steps:
+        kind = step.get("kind")
+        if kind == "request":
+            outcome = _run_request_step(step, scope, ctx)
+        elif kind == "poll":
+            outcome = _run_poll_step(step, scope, ctx)
+        elif kind == "for_each":
+            outcome = _run_for_each_step(step, scope, ctx)
         else:
-            outcome = _run_poll_step(
-                step,
-                bindings,
-                auth_headers,
-                signing_token,
-                broker_client,
-                program,
-                out,
-                now,
+            # A kind this relay does not know. Running it as something else
+            # forwards requests nobody authored; refusing is the only safe
+            # reading.
+            ctx.out.append(
+                provider_error_response(
+                    502,
+                    ctx.program.get("purpose", ""),
+                    f"unsupported step kind: {_js_string(kind)}",
+                )
             )
+            outcome = "terminate"
         if outcome == "terminate":
-            return out
-    return out
+            return "terminate"
+    return "continue"
 
 
-def _run_request_step(
-    step, bindings, auth_headers, signing_token, broker_client, program, out
-) -> str:
+def _run_for_each_step(step: dict[str, Any], scope: _Scope, ctx: _Ctx) -> str:
+    """Run the step's own steps once per item of the list binding ``over``.
+    More than ``max_items`` items ends the program with a 502: stopping after
+    the first ``max_items`` would submit a window that reads as complete while
+    missing spend. A list never bound is a program bug, not an empty list (an
+    extract on an absent path binds ``[]``)."""
+    purpose = ctx.program.get("purpose", "")
+    items = scope.lists.get(step["over"])
+    if items is None:
+        ctx.out.append(
+            provider_error_response(
+                502, purpose, f"for_each: list binding missing: {step['over']}"
+            )
+        )
+        return "terminate"
+    max_items = step.get("max_items", 50)
+    if len(items) > max_items:
+        ctx.out.append(
+            provider_error_response(
+                502,
+                purpose,
+                f"for_each: {len(items)} items exceed max_items {max_items}",
+            )
+        )
+        return "terminate"
+    for item in items:
+        iteration = _Scope(
+            strings={**scope.strings, step["as_binding"]: item},
+            lists=dict(scope.lists),
+        )
+        if _run_steps(step.get("steps") or [], iteration, ctx) == "terminate":
+            return "terminate"
+    return "continue"
+
+
+def _run_request_step(step: dict[str, Any], scope: _Scope, ctx: _Ctx) -> str:
     return _forward_and_extract(
         step["request"],
         step.get("extract") or [],
         step.get("stop_on_status_gte", 400),
-        bindings,
-        auth_headers,
-        signing_token,
-        broker_client,
-        program,
-        out,
+        scope,
+        ctx,
     )
 
 
-def _run_poll_step(
-    step, bindings, auth_headers, signing_token, broker_client, program, out, now
-) -> str:
+def _run_poll_step(step: dict[str, Any], scope: _Scope, ctx: _Ctx) -> str:
+    now, out, program = ctx.now, ctx.out, ctx.program
+    bindings = scope.strings
     loop_start = now()
     iterations = 0
     require_bindings = step.get("require_bindings") or []
@@ -182,12 +246,8 @@ def _run_poll_step(
             step["request"],
             step.get("extract") or [],
             step.get("stop_on_status_gte", 400),
-            bindings,
-            auth_headers,
-            signing_token,
-            broker_client,
-            program,
-            out,
+            scope,
+            ctx,
         )
         if outcome == "terminate":
             return "terminate"
@@ -197,14 +257,11 @@ def _forward_and_extract(
     req,
     extract,
     stop_gte,
-    bindings,
-    auth_headers,
-    signing_token,
-    broker_client,
-    program,
-    out,
+    scope: _Scope,
+    ctx: _Ctx,
 ) -> str:
-    built = _build_concrete_request(req, bindings)
+    program, out = ctx.program, ctx.out
+    built = _build_concrete_request(req, scope.strings)
     if built is None:
         out.append(
             provider_error_response(
@@ -216,8 +273,8 @@ def _forward_and_extract(
         return "terminate"
 
     try:
-        broker_resp = broker_client.forward(
-            build_forward_request(built, auth_headers, signing_token)
+        broker_resp = ctx.broker_client.forward(
+            build_forward_request(built, ctx.sign, ctx.signing_token)
         )
     except BrokerForwardCapError:
         raise
@@ -233,13 +290,26 @@ def _forward_and_extract(
     out.append(relayed)
     if relayed["status"] >= stop_gte:
         return "terminate"
-    if not _apply_extract(extract, relayed["body_b64"], bindings):
+    extracted = _apply_extract(extract, relayed["body_b64"], scope)
+    if extracted == "undecodable":
         # A 2xx we declared extract rules against, whose body will not decode.
         # Continuing would forward later steps against empty bindings and land
         # a green card holding no data; fail loudly instead.
         out.append(
             provider_error_response(
                 502, program.get("purpose", ""), "extract: response body is not JSON"
+            )
+        )
+        return "terminate"
+    if extracted == "bad_list":
+        # A list whose items will become request PATH segments, holding
+        # something that is not a safe id. Refuse it whole rather than skip
+        # the item: a skipped invoice is spend that silently never arrives.
+        out.append(
+            provider_error_response(
+                502,
+                program.get("purpose", ""),
+                "extract: list is not an array of safe path values",
             )
         )
         return "terminate"
@@ -407,12 +477,12 @@ def _contains_lone_surrogate(value: Any) -> bool:
     return False
 
 
-def _apply_extract(
-    rules: list[dict[str, Any]], body_b64: str, bindings: dict[str, str]
-) -> bool:
-    """Apply a step's extract rules, mutating ``bindings``. Returns ``False``
-    when the body could not be decoded at all — the caller turns that into a
-    provider-error and stops.
+def _apply_extract(rules: list[dict[str, Any]], body_b64: str, scope: _Scope) -> str:
+    """Apply a step's extract rules, mutating ``scope``. Returns
+    ``"undecodable"`` when the body could not be decoded at all, and
+    ``"bad_list"`` when a ``string_list`` rule found something other than an
+    array of safe path values — the caller turns either into a provider-error
+    and stops; ``"ok"`` otherwise.
 
     A body we cannot read is NOT the same as a field that happens to be
     absent. An absent path still binds ``""`` (google's ``pageToken`` and
@@ -421,8 +491,9 @@ def _apply_extract(
     Writing ``""`` for every rule off an unreadable body conflated the two and
     let a program walk every step, extract nothing, and finish green.
 
-    ``bindings`` is left UNTOUCHED on failure. That is safe only because every
-    caller terminates the run on ``False`` — nothing in the signature enforces
+    ``scope`` is left UNTOUCHED on an undecodable body (a ``bad_list`` may
+    follow earlier rules' writes). That is safe only because every caller
+    terminates the run on either failure — nothing in the signature enforces
     the coupling. ASSUMPTION: a decode failure is always terminal. If that ever
     stops being true, the loop resumes against bindings still holding the
     PREVIOUS iteration's values, and the next request goes out with a stale
@@ -430,19 +501,43 @@ def _apply_extract(
     visible failure. Clear the rules' bindings here before relaxing it.
     """
     if not rules:
-        return True
+        return "ok"
     try:
         parsed: Any = _decode_body_strict(body_b64)
     except (ValueError, UnicodeDecodeError):
-        return False
+        return "undecodable"
     for rule in rules:
         raw = _read_dotted_path(parsed, rule["path"])
-        if rule.get("coerce") == "bool":
+        coerce = rule.get("coerce")
+        if coerce == "string_list":
+            # Absent → empty list (nothing to walk); anything present must be
+            # an array of safe path values, since each item becomes a path
+            # segment.
+            if raw is None:
+                scope.lists[rule["as_binding"]] = []
+                continue
+            if not isinstance(raw, list) or not all(
+                _is_safe_path_value(v) for v in raw
+            ):
+                return "bad_list"
+            scope.lists[rule["as_binding"]] = list(raw)
+            continue
+        if coerce == "bool":
             value = "true" if raw is True else ""
         else:
             value = _js_string(raw)
-        bindings[rule["as_binding"]] = value
-    return True
+        scope.strings[rule["as_binding"]] = value
+    return "ok"
+
+
+def _is_safe_path_value(v: Any) -> bool:
+    """A non-empty string that may be spliced into a request path."""
+    return (
+        isinstance(v, str)
+        and v != ""
+        and _PATH_VALUE_CHARSET.match(v) is not None
+        and ".." not in v
+    )
 
 
 def _js_string(raw: Any) -> str:
@@ -528,6 +623,9 @@ def _ecma_notation(shortest: str) -> str:
 
 
 def _read_dotted_path(obj: Any, path: str) -> Any:
+    # The empty path is the whole body (a bare JSON array of ids, say).
+    if path == "":
+        return obj
     cur = obj
     for segment in path.split("."):
         if not isinstance(cur, dict):

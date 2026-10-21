@@ -48,6 +48,134 @@
         "Authorization": "Basic dXPDqXItz4AtNDI6YWZjN2VmOTUyZjdjNDM3MDliMjgxMWEyMTlkMGFmYzk4Y2YyOGQ4ZGEzN2IyZDRlMDI4YWQ3YjM3MjYzODEzMw==",
         "Timestamp": "1720000000"
       }
+    },
+    {
+      "name": "ovh_v1-get-query",
+      "input": {
+        "kind": "ovh_v1",
+        "application_key": "ak-app",
+        "credential": "as-secret:ck-consumer",
+        "timestamp_sec": 1760000000,
+        "target": {
+          "host": "eu.api.ovh.com",
+          "path": "/1.0/me/bill",
+          "method": "GET",
+          "query": "date.from=2026-01-01"
+        },
+        "body": null
+      },
+      "expect": {
+        "X-Ovh-Application": "ak-app",
+        "X-Ovh-Consumer": "ck-consumer",
+        "X-Ovh-Timestamp": "1760000000",
+        "X-Ovh-Signature": "$1$fa36cbab0b83cb9b004740428d2969a7fab93e2d"
+      }
+    },
+    {
+      "name": "ovh_v1-get-no-query",
+      "input": {
+        "kind": "ovh_v1",
+        "application_key": "ak-app",
+        "credential": "as-secret:ck-consumer",
+        "timestamp_sec": 1760000000,
+        "target": {
+          "host": "api.us.ovhcloud.com",
+          "path": "/1.0/me/bill/US123/details",
+          "method": "GET"
+        },
+        "body": null
+      },
+      "expect": {
+        "X-Ovh-Application": "ak-app",
+        "X-Ovh-Consumer": "ck-consumer",
+        "X-Ovh-Timestamp": "1760000000",
+        "X-Ovh-Signature": "$1$d07a51c592e0a51e8b597e55a5e111319916341c"
+      }
+    },
+    {
+      "name": "ovh_v1-post-binary-body",
+      "input": {
+        "kind": "ovh_v1",
+        "application_key": "ak-app",
+        "credential": "as-secret:ck-consumer",
+        "timestamp_sec": 1760000000,
+        "target": {
+          "host": "eu.api.ovh.com",
+          "path": "/1.0/x",
+          "method": "POST"
+        },
+        "body": "eyLDqSI6/30="
+      },
+      "expect": {
+        "X-Ovh-Application": "ak-app",
+        "X-Ovh-Consumer": "ck-consumer",
+        "X-Ovh-Timestamp": "1760000000",
+        "X-Ovh-Signature": "$1$f836a826b7c9f53d0340cc8aee4f69a3643aeaf8"
+      }
+    },
+    {
+      "name": "ovh_v1-encoded-query",
+      "input": {
+        "kind": "ovh_v1",
+        "application_key": "ak-app",
+        "credential": "as-secret:ck-consumer",
+        "timestamp_sec": 1760000000,
+        "target": {
+          "host": "ca.api.ovh.com",
+          "path": "/1.0/me/bill",
+          "method": "GET",
+          "query": "date.from=2026-01-01T00%3A00%3A00Z&date.to=2026-02-01"
+        },
+        "body": null
+      },
+      "expect": {
+        "X-Ovh-Application": "ak-app",
+        "X-Ovh-Consumer": "ck-consumer",
+        "X-Ovh-Timestamp": "1760000000",
+        "X-Ovh-Signature": "$1$e7b1207bca71e2826752e421e4e435e8730b8811"
+      }
+    },
+    {
+      "name": "ovh_v1-colon-in-consumer-key",
+      "input": {
+        "kind": "ovh_v1",
+        "application_key": "ak-app",
+        "credential": "as:ck:x",
+        "timestamp_sec": 1760000000,
+        "target": {
+          "host": "eu.api.ovh.com",
+          "path": "/1.0/me",
+          "method": "GET"
+        },
+        "body": null
+      },
+      "expect": {
+        "X-Ovh-Application": "ak-app",
+        "X-Ovh-Consumer": "ck:x",
+        "X-Ovh-Timestamp": "1760000000",
+        "X-Ovh-Signature": "$1$67c8d59a92aa6d46554367bd1a84a06d2b01670c"
+      }
+    },
+    {
+      "name": "ovh_v1-unicode-secret",
+      "input": {
+        "kind": "ovh_v1",
+        "application_key": "ak-app",
+        "credential": "sécret-π:ck",
+        "timestamp_sec": 1760000000,
+        "target": {
+          "host": "eu.api.ovh.com",
+          "path": "/1.0/me",
+          "method": "GET"
+        },
+        "body": null
+      },
+      "expect": {
+        "X-Ovh-Application": "ak-app",
+        "X-Ovh-Consumer": "ck",
+        "X-Ovh-Timestamp": "1760000000",
+        "X-Ovh-Signature": "$1$6419b1c5fdc5d6ba25a8073964a9ce8107077e39"
+      }
     }
   ]
 }

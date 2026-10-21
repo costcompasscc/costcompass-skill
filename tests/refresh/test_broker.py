@@ -8,6 +8,7 @@ import pytest
 
 import costcompass
 from costcompass.refresh import broker
+from costcompass.refresh.signers import fixed_headers_signer
 
 
 def make_broker(handler, **kw) -> broker.BrokerClient:
@@ -45,7 +46,9 @@ def test_build_forward_request_merges_auth():
         "headers": {"Accept": "json"},
         "purpose": "u",
     }
-    fwd = broker.build_forward_request(req, {"x-api-key": "k"}, "tok")
+    fwd = broker.build_forward_request(
+        req, fixed_headers_signer({"x-api-key": "k"}), "tok"
+    )
     assert fwd["headers"] == {"Accept": "json", "x-api-key": "k"}
     assert fwd["signing_token"] == "tok"
 
@@ -70,11 +73,11 @@ def test_build_forward_request_relays_flat_req_sig():
     # A server-signed flat request carries req_sig in the plan dict; the CLI
     # relays it verbatim (the flat path needs no special-casing).
     req = {"url": "https://h/p", "method": "POST", "body": "Yg==", "req_sig": "abc123"}
-    fwd = broker.build_forward_request(req, {}, "tok")
+    fwd = broker.build_forward_request(req, fixed_headers_signer({}), "tok")
     assert fwd["req_sig"] == "abc123"
     # ...and omits it when unsigned (body-less flat request).
     bare = broker.build_forward_request(
-        {"url": "https://h/p", "method": "GET"}, {}, "tok"
+        {"url": "https://h/p", "method": "GET"}, fixed_headers_signer({}), "tok"
     )
     assert bare["req_sig"] is None
 
@@ -380,7 +383,7 @@ def test_retry_recovers_after_transient_broker_error():
 
     client = make_broker(handler, sleep=slept.append)
     resp = client.forward_with_retry(
-        {"target": {}, "headers": {}, "signing_token": "t"}
+        lambda: {"target": {}, "headers": {}, "signing_token": "t"}
     )
     assert resp["status"] == 200
     assert calls["n"] == 3  # two transient failures, then success
@@ -406,7 +409,7 @@ def test_retry_recovers_after_transient_upstream_status():
 
     client = make_broker(handler, sleep=lambda *_: None)
     resp = client.forward_with_retry(
-        {"target": {}, "headers": {}, "signing_token": "t"}
+        lambda: {"target": {}, "headers": {}, "signing_token": "t"}
     )
     assert resp["status"] == 200
     assert calls["n"] == 2
@@ -421,7 +424,9 @@ def test_retry_exhausts_and_raises_final_error():
         sleep=lambda *_: None,
     )
     with pytest.raises(broker.BrokerError) as exc:
-        client.forward_with_retry({"target": {}, "headers": {}, "signing_token": "t"})
+        client.forward_with_retry(
+            lambda: {"target": {}, "headers": {}, "signing_token": "t"}
+        )
     assert exc.value.code == "rate_limited"
 
 
@@ -436,7 +441,9 @@ def test_retry_does_not_retry_non_transient():
 
     client = make_broker(handler, sleep=lambda *_: None)
     with pytest.raises(broker.BrokerError):
-        client.forward_with_retry({"target": {}, "headers": {}, "signing_token": "t"})
+        client.forward_with_retry(
+            lambda: {"target": {}, "headers": {}, "signing_token": "t"}
+        )
     assert calls["n"] == 1  # forbidden is not transient → no retry
 
 
@@ -456,7 +463,7 @@ def test_retry_refused_when_the_backoff_does_not_fit_the_budget():
     client = make_broker(handler, sleep=slept.append)
     with pytest.raises(broker.BrokerRunDeadlineError):
         client.forward_with_retry(
-            {"target": {}, "headers": {}, "signing_token": "t"},
+            lambda: {"target": {}, "headers": {}, "signing_token": "t"},
             can_wait=lambda _seconds: False,
         )
     # One forward, and no sleep: the wait is refused BEFORE it is taken, since
@@ -487,7 +494,7 @@ def test_retry_proceeds_when_the_backoff_fits_the_budget():
 
     client = make_broker(handler, sleep=lambda *_: None)
     resp = client.forward_with_retry(
-        {"target": {}, "headers": {}, "signing_token": "t"}, can_wait=can_wait
+        lambda: {"target": {}, "headers": {}, "signing_token": "t"}, can_wait=can_wait
     )
     assert resp["status"] == 200
     assert calls["n"] == 2
@@ -516,7 +523,7 @@ def test_retry_refused_when_the_sleep_itself_overruns_the_budget():
     client = make_broker(handler, sleep=lambda *_: None)
     with pytest.raises(broker.BrokerRunDeadlineError):
         client.forward_with_retry(
-            {"target": {}, "headers": {}, "signing_token": "t"},
+            lambda: {"target": {}, "headers": {}, "signing_token": "t"},
             can_wait=lambda _seconds: answers.pop(0),
         )
     # The wait was granted and taken; the forward on the far side never happens.
@@ -541,7 +548,7 @@ def test_retry_does_not_count_against_forward_cap():
 
     client = make_broker(handler, forward_cap=1, sleep=lambda *_: None)
     resp = client.forward_with_retry(
-        {"target": {}, "headers": {}, "signing_token": "tok"}
+        lambda: {"target": {}, "headers": {}, "signing_token": "tok"}
     )
     assert resp["status"] == 200
     # Only the initial attempt counted against the cap; a second fresh forward

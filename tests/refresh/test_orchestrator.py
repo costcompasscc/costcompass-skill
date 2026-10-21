@@ -10,6 +10,7 @@ import pytest
 
 from costcompass import api, config, vault
 from costcompass.refresh import broker, oauth, orchestrator
+from costcompass.refresh.signers import fixed_headers_signer
 
 PASSWORD = "pw"
 
@@ -1552,7 +1553,7 @@ def test_flat_broker_error_classified_not_502():
         "auth_header": "x",
         "auth_scheme": None,
     }
-    out = orchestrator._run_flat(plan, {"x": "k"}, "tok", brk)
+    out = orchestrator._run_flat(plan, fixed_headers_signer({"x": "k"}), "tok", brk)
     assert out[0]["status"] == 429  # what the broker answered, not a generic 502
     # Flagged synthetic and carrying the REAL request URL, matching the browser.
     # The flag makes the App Server strip the stub before plugin.process(), so
@@ -1599,7 +1600,7 @@ def test_flat_broker_error_relays_a_4xx_the_old_map_collapsed():
         "auth_header": "x",
         "auth_scheme": None,
     }
-    out = orchestrator._run_flat(plan, {"x": "k"}, "tok", brk)
+    out = orchestrator._run_flat(plan, fixed_headers_signer({"x": "k"}), "tok", brk)
     assert out[0]["status"] == 400
 
 

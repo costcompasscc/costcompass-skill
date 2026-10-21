@@ -667,7 +667,7 @@ def _submit_outcome(
 
 def _run_flat(
     plan: dict[str, Any],
-    auth_headers: dict[str, str],
+    sign: signers.RequestSigner,
     signing_token: str | None,
     broker: BrokerClient,
     budget_allows: Callable[[float], bool] | None = None,
@@ -701,7 +701,7 @@ def _run_flat(
             return out
         try:
             resp = broker.forward_with_retry(
-                build_forward_request(req, auth_headers, signing_token),
+                lambda req=req: build_forward_request(req, sign, signing_token),
                 can_wait=budget_allows,
             )
         except BrokerForwardCapError:
@@ -735,6 +735,7 @@ def _process_entry(
     run_id: str,
     resolver: oauth.OAuthResolver | None,
     budget_allows: Callable[[float], bool] | None = None,
+    plans_received_at_sec: int | None = None,
 ) -> EntryOutcome:
     provider = entry["provider_id"]
     instance = entry.get("instance_key", "")
@@ -816,7 +817,7 @@ def _process_entry(
             instance_label=label,
         )
 
-    auth_headers = signers.build_plan_headers(plan, credential)
+    sign = signers.build_plan_signer(plan, credential, plans_received_at_sec)
     signing_token = entry.get("signing_token")
 
     if plan.get("program"):
@@ -829,7 +830,7 @@ def _process_entry(
         # submitForwardCapExceeded and the macOS runPlan.
         try:
             responses = program.run_program(
-                plan["program"], auth_headers, signing_token, broker
+                plan["program"], sign, signing_token, broker
             )
         except BrokerForwardCapError:
             responses = [
@@ -839,7 +840,7 @@ def _process_entry(
                 )
             ]
     else:
-        responses = _run_flat(plan, auth_headers, signing_token, broker, budget_allows)
+        responses = _run_flat(plan, sign, signing_token, broker, budget_allows)
 
     return _submit_outcome(
         client,
@@ -956,12 +957,24 @@ def _run(
         outcomes: list[EntryOutcome]
         with _ProgressTicker(progress, progress_write):
             run_data = client.create_fetch_run(providers)
+            # When the plans arrived. A signer that must agree with the
+            # provider's clock turns its plan's ``server_now`` into an offset
+            # against THIS moment, not against when its entry happens to
+            # start — that can be minutes later on a long run.
+            plans_received_at_sec = int(time.time())
             run_id = run_data["run_id"]
             outcomes, stopped = _run_with_concurrency(
                 list(run_data.get("fetches", [])),
                 concurrency,
                 lambda entry: _process_entry(
-                    entry, vault, broker, client, run_id, resolver, budget_allows
+                    entry,
+                    vault,
+                    broker,
+                    client,
+                    run_id,
+                    resolver,
+                    budget_allows,
+                    plans_received_at_sec,
                 ),
                 past_deadline,
             )
