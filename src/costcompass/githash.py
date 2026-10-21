@@ -3,4 +3,4 @@
 Empty when generated outside a git tree.
 """
 
-GIT_SHA = "4ed4980b8c75"
+GIT_SHA = "5eeb15f14c6a"
