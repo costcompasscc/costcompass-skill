@@ -1,0 +1,176 @@
+{
+  "_comment": "HAND-WRITTEN corpus. It pins a DECISION, not any one relay's behaviour: which server-authored plans a relay may RUN, and which it must instead skip as `unsupported_plan_kind` before resolving a credential or calling the broker. THE RULE: a plan is runnable iff (a) `signed_auth` is absent or null, or its `kind` is one this relay implements, AND (b) `program` is absent or null, or every step's `kind` is one this relay implements, checked recursively through each `for_each` step's own `steps`. A missing `kind` is not a kind this relay implements. Only kinds are judged here; a step whose kind is known but whose fields are malformed is the interpreter's business, not this check's. Every relay today implements signers `qc_hmac_v1`, `ovh_v1` and steps `request`, `poll`, `for_each`, so `mystery_*` stands in for whatever the server ships next. The pre-flight is a skip, not a failure: the relay is behind the server, nothing about the card is broken, and an update fixes it.",
+  "vectors": [
+    {
+      "name": "flat-plan-no-signer-runs",
+      "why": "The common case: a bearer-header flat plan names no signer and no program, so there is nothing a relay could be missing.",
+      "plan": {
+        "requests": [{ "url": "https://api.example.com/usage", "method": "GET" }],
+        "auth_header": "Authorization",
+        "auth_scheme": "Bearer"
+      },
+      "expect_supported": true
+    },
+    {
+      "name": "explicit-null-signer-and-program-run",
+      "why": "The server serialises an absent signer and program as null; null must read as absent, not as an unknown kind.",
+      "plan": {
+        "requests": [{ "url": "https://api.example.com/usage", "method": "GET" }],
+        "auth_header": "Authorization",
+        "auth_scheme": "Bearer",
+        "signed_auth": null,
+        "program": null
+      },
+      "expect_supported": true
+    },
+    {
+      "name": "qc-hmac-signer-runs",
+      "why": "A signer every relay implements.",
+      "plan": {
+        "requests": [{ "url": "https://api.example.com/usage", "method": "GET" }],
+        "auth_header": "Authorization",
+        "signed_auth": { "kind": "qc_hmac_v1", "user_id": "u-1" }
+      },
+      "expect_supported": true
+    },
+    {
+      "name": "ovh-signer-runs",
+      "why": "The signer whose arrival on the server ahead of the macOS app is what this rule exists for.",
+      "plan": {
+        "requests": [{ "url": "https://api.example.com/usage", "method": "GET" }],
+        "auth_header": "X-Ovh-Signature",
+        "signed_auth": { "kind": "ovh_v1", "application_key": "ak-1", "server_now": 1760000000 }
+      },
+      "expect_supported": true
+    },
+    {
+      "name": "unknown-signer-skips",
+      "why": "A signer this relay has not learned. Running the plan would throw mid-entry after the credential was already resolved; the relay must skip it up front instead.",
+      "plan": {
+        "requests": [{ "url": "https://api.example.com/usage", "method": "GET" }],
+        "auth_header": "Authorization",
+        "signed_auth": { "kind": "mystery_signer_v9" }
+      },
+      "expect_supported": false
+    },
+    {
+      "name": "signer-without-kind-skips",
+      "why": "A signer object with no kind names nothing this relay implements, so it cannot be signed.",
+      "plan": {
+        "requests": [{ "url": "https://api.example.com/usage", "method": "GET" }],
+        "auth_header": "Authorization",
+        "signed_auth": { "user_id": "u-1" }
+      },
+      "expect_supported": false
+    },
+    {
+      "name": "program-of-known-steps-runs",
+      "why": "Request and poll at the top level, the BigQuery shape.",
+      "plan": {
+        "requests": [],
+        "auth_header": "Authorization",
+        "auth_scheme": "Bearer",
+        "program": {
+          "steps": [
+            { "kind": "request", "request": { "host": "api.example.com", "path": "/jobs" } },
+            {
+              "kind": "poll",
+              "request": { "host": "api.example.com", "path": "/jobs/{job_id}" },
+              "until": { "any_of": [{ "kind": "truthy", "binding": "done" }] }
+            }
+          ]
+        }
+      },
+      "expect_supported": true
+    },
+    {
+      "name": "nested-for-each-of-known-steps-runs",
+      "why": "The check recurses: a for_each whose own steps are a request and a nested for_each is runnable.",
+      "plan": {
+        "requests": [],
+        "auth_header": "Authorization",
+        "program": {
+          "steps": [
+            { "kind": "request", "request": { "host": "api.example.com", "path": "/bills" } },
+            {
+              "kind": "for_each",
+              "over": "bill_ids",
+              "as_binding": "bill_id",
+              "steps": [
+                { "kind": "request", "request": { "host": "api.example.com", "path": "/bills/{bill_id}" } },
+                {
+                  "kind": "for_each",
+                  "over": "detail_ids",
+                  "as_binding": "detail_id",
+                  "steps": [
+                    { "kind": "request", "request": { "host": "api.example.com", "path": "/details/{detail_id}" } }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expect_supported": true
+    },
+    {
+      "name": "unknown-top-level-step-skips",
+      "why": "A step kind this relay has not learned, at the top level of the program.",
+      "plan": {
+        "requests": [],
+        "auth_header": "Authorization",
+        "program": {
+          "steps": [
+            { "kind": "request", "request": { "host": "api.example.com", "path": "/a" } },
+            { "kind": "mystery_step" }
+          ]
+        }
+      },
+      "expect_supported": false
+    },
+    {
+      "name": "unknown-step-inside-for-each-skips",
+      "why": "The unknown kind is only reachable by recursing into a for_each. A check that looked at top-level kinds alone would run this plan and fail inside the loop.",
+      "plan": {
+        "requests": [],
+        "auth_header": "Authorization",
+        "program": {
+          "steps": [
+            {
+              "kind": "for_each",
+              "over": "ids",
+              "as_binding": "id",
+              "steps": [{ "kind": "mystery_step" }]
+            }
+          ]
+        }
+      },
+      "expect_supported": false
+    },
+    {
+      "name": "step-without-kind-skips",
+      "why": "A step with no kind names nothing this relay implements.",
+      "plan": {
+        "requests": [],
+        "auth_header": "Authorization",
+        "program": {
+          "steps": [{ "request": { "host": "api.example.com", "path": "/a" } }]
+        }
+      },
+      "expect_supported": false
+    },
+    {
+      "name": "known-program-with-unknown-signer-skips",
+      "why": "Both halves are judged: a runnable program does not excuse a signer this relay cannot apply.",
+      "plan": {
+        "requests": [],
+        "auth_header": "Authorization",
+        "signed_auth": { "kind": "mystery_signer_v9" },
+        "program": {
+          "steps": [{ "kind": "request", "request": { "host": "api.example.com", "path": "/a" } }]
+        }
+      },
+      "expect_supported": false
+    }
+  ]
+}

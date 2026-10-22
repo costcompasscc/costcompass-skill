@@ -132,16 +132,17 @@ def _run_steps(steps: list[dict[str, Any]], scope: _Scope, ctx: _Ctx) -> str:
     """Walk ``steps`` in order; stop at the first that ends the program."""
     for step in steps:
         kind = step.get("kind")
-        if kind == "request":
-            outcome = _run_request_step(step, scope, ctx)
-        elif kind == "poll":
-            outcome = _run_poll_step(step, scope, ctx)
-        elif kind == "for_each":
-            outcome = _run_for_each_step(step, scope, ctx)
+        # Dispatch through ``_STEP_RUNNERS`` (below the runners) so the set of
+        # kinds the orchestrator's pre-flight accepts IS the set this loop runs.
+        runner = _STEP_RUNNERS.get(kind) if isinstance(kind, str) else None
+        if runner is not None:
+            outcome = runner(step, scope, ctx)
         else:
             # A kind this relay does not know. Running it as something else
             # forwards requests nobody authored; refusing is the only safe
-            # reading.
+            # reading. The orchestrator skips such a plan before it gets here
+            # (``first_unsupported_step_kind``); this stays as the backstop for
+            # a caller that runs a program without that check.
             ctx.out.append(
                 provider_error_response(
                     502,
@@ -251,6 +252,53 @@ def _run_poll_step(step: dict[str, Any], scope: _Scope, ctx: _Ctx) -> str:
         )
         if outcome == "terminate":
             return "terminate"
+
+
+_StepRunner = Callable[[dict[str, Any], _Scope, _Ctx], str]
+
+#: Every step ``kind`` this interpreter runs, keyed to its runner. ``_run_steps``
+#: dispatches through this table, so ``IMPLEMENTED_STEP_KINDS`` cannot drift
+#: from what actually runs — Python has no compile-time exhaustiveness check
+#: like the browser's ``Record<Step["kind"], true>``, so the set is derived
+#: rather than listed twice.
+_STEP_RUNNERS: dict[str, _StepRunner] = {
+    "request": _run_request_step,
+    "poll": _run_poll_step,
+    "for_each": _run_for_each_step,
+}
+IMPLEMENTED_STEP_KINDS: frozenset[str] = frozenset(_STEP_RUNNERS)
+
+
+def first_unsupported_step_kind(steps: list[Any]) -> str | None:
+    """The first step kind in ``steps`` this interpreter cannot run, searched
+    through every ``for_each``'s own steps, or ``None`` when all are runnable.
+
+    The orchestrator's pre-flight: a program naming a kind that shipped on the
+    server before this client learned it is skipped as a version lag before any
+    credential is resolved, instead of failing the card with a 502 mid-run.
+    Only kinds are judged — a known step with malformed fields is still the
+    interpreter's to refuse. A missing or non-string kind names nothing this
+    relay implements."""
+    for step in steps:
+        kind = step.get("kind") if isinstance(step, dict) else None
+        if not isinstance(kind, str) or kind not in IMPLEMENTED_STEP_KINDS:
+            return kind_display(step)
+        if kind == "for_each":
+            inner = first_unsupported_step_kind(step.get("steps") or [])
+            if inner is not None:
+                return inner
+    return None
+
+
+def kind_display(obj: Any) -> str:
+    """``obj``'s ``kind`` rendered as the browser's ``String(obj?.kind)`` does,
+    so a skip detail reads the same whichever relay wrote it: an absent kind
+    (or a non-object holder) is ``undefined`` and a JSON null is ``null`` —
+    which ``_js_string`` renders empty, being tuned for array joins."""
+    if not isinstance(obj, dict) or "kind" not in obj:
+        return "undefined"
+    kind = obj["kind"]
+    return "null" if kind is None else _js_string(kind)
 
 
 def _forward_and_extract(

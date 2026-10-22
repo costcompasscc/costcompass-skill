@@ -281,6 +281,7 @@ SKIP_NO_CREDENTIALS = "no_credentials"
 SKIP_SENTINEL_VANISHED = "oauth_sentinel_vanished"
 SKIP_ROTATION_SUPERSEDED = "oauth_rotation_superseded"
 SKIP_UNSUPPORTED_KIND = "unsupported_credential_kind"
+SKIP_UNSUPPORTED_PLAN = "unsupported_plan_kind"
 
 # Which marker each aborted rotation reports. Keyed lookup, not a conditional:
 # an unmapped abort outcome raises ``KeyError`` here instead of being silently
@@ -727,6 +728,28 @@ def _run_flat(
     return out
 
 
+def unsupported_plan_kind(plan: dict[str, Any]) -> str | None:
+    """What in ``plan`` this relay cannot run — its signer, or a program step at
+    any depth — or ``None`` when it can run all of it. The pre-flight
+    ``_process_entry`` skips on; ``test-vectors/relay/plan-support.json`` (in
+    the monorepo, vendored under tests/vectors/relay/) pins the rule across the
+    three relays. The signer is judged first, then the program. A null
+    ``signed_auth``/``program`` reads as absent; any other value, an empty
+    object included, must name a kind this relay implements."""
+    signed = plan.get("signed_auth")
+    if signed is not None:
+        kind = signed.get("kind") if isinstance(signed, dict) else None
+        if not signers.supports_signer_kind(kind):
+            return f"signed_auth kind '{program.kind_display(signed)}'"
+    prog = plan.get("program")
+    if prog is not None:
+        steps = prog.get("steps") if isinstance(prog, dict) else None
+        kind = program.first_unsupported_step_kind(steps or [])
+        if kind is not None:
+            return f"program step kind '{kind}'"
+    return None
+
+
 def _process_entry(
     entry: dict[str, Any],
     vault: vault_mod.Vault,
@@ -747,6 +770,26 @@ def _process_entry(
             instance,
             entry.get("state", "skipped"),
             error_message=entry.get("skip_reason") or entry.get("error_message"),
+            instance_label=label,
+        )
+
+    # A plan naming a signer or program step this client has not learned is a
+    # version lag, not a fault: skip it benignly BEFORE resolving anything, so
+    # no OAuth token is minted and no broker call made for a plan that cannot
+    # run. Left to the fetch, an unknown signer raises out of the whole run
+    # (leaving it unfinalized) and an unknown step fails the card with a 502 —
+    # and "try again" never helps either. Only an update does.
+    missing = unsupported_plan_kind(plan)
+    if missing is not None:
+        detail = f"{missing} is not supported by this client — update it"
+        return _submit_outcome(
+            client,
+            run_id,
+            provider,
+            instance,
+            [_synthetic_skip(plan, SKIP_UNSUPPORTED_PLAN, detail)],
+            fallback_state="skipped",
+            local_message=detail,
             instance_label=label,
         )
 

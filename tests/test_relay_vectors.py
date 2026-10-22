@@ -430,3 +430,20 @@ def _probe_entry_purpose(name: str, purpose: str) -> None:
     rows = json.loads(path.read_text()) if path.exists() else []
     rows.append({"name": name, "purpose": purpose})
     path.write_text(json.dumps(rows, indent=2) + "\n")
+
+
+# --- Plan support pre-flight ------------------------------------------------
+# Hand-written corpus, like entry-purpose: it pins a DECISION — which
+# server-authored plans a relay may run at all, versus skip as a version lag —
+# that no one relay can be the oracle for, because each relay's answer is its
+# own set of implemented kinds. The three sets are equal today, so the three
+# relays must agree on every vector; a relay that learns a kind first is
+# exactly the moment this corpus gets a new vector.
+
+_PLAN_SUPPORT = _load("plan-support.json")
+
+
+@pytest.mark.parametrize("vec", _PLAN_SUPPORT, ids=_ids(_PLAN_SUPPORT))
+def test_plan_support_vector(vec: dict) -> None:
+    got = orchestrator.unsupported_plan_kind(vec["plan"])
+    assert (got is None) == vec["expect_supported"], vec["why"]

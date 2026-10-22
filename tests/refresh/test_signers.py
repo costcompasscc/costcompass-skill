@@ -118,3 +118,46 @@ def test_ovh_v1_clock_offset_is_fixed_at_plan_receipt(monkeypatch):
     # A retry 300s later carries the server's time, not a stale one.
     monkeypatch.setattr(signers.time, "time", lambda: float(received + 300))
     assert sign(_BILLS, None)["X-Ovh-Timestamp"] == "1760000300"
+
+
+# One valid spec per implemented signer kind. Python has no compile-time check
+# that ``IMPLEMENTED_SIGNER_KINDS`` matches what ``build_plan_signer`` signs
+# with, so this pins it at test time: the set must equal this table's keys (a
+# new kind needs a spec here), and every kind must build without reaching the
+# unsupported branch — which is what the orchestrator's pre-flight relies on.
+_VALID_SIGNER_PLANS = {
+    "qc_hmac_v1": (
+        {
+            "auth_header": "x",
+            "signed_auth": {
+                "kind": "qc_hmac_v1",
+                "user_id": "42",
+                "authorization_header": "Authorization",
+                "authorization_scheme": "Basic",
+                "timestamp_header": "Timestamp",
+            },
+        },
+        "apitoken",
+    ),
+    "ovh_v1": (_OVH_PLAN, "as-secret:ck-consumer"),
+}
+
+
+def test_implemented_signer_kinds_match_the_dispatcher():
+    assert set(_VALID_SIGNER_PLANS) == signers.IMPLEMENTED_SIGNER_KINDS
+
+
+@pytest.mark.parametrize("kind", sorted(signers.IMPLEMENTED_SIGNER_KINDS))
+def test_every_implemented_signer_kind_builds(kind):
+    plan, cred = _VALID_SIGNER_PLANS[kind]
+    assert signers.supports_signer_kind(kind)
+    assert signers.build_plan_signer(plan, cred)(_BILLS, None)
+
+
+@pytest.mark.parametrize("kind", ["mystery_signer_v9", None, 7, ["qc_hmac_v1"]])
+def test_an_unimplemented_signer_kind_is_unsupported_and_refused(kind):
+    assert not signers.supports_signer_kind(kind)
+    with pytest.raises(ValueError, match="unsupported signed_auth kind"):
+        signers.build_plan_signer(
+            {"auth_header": "x", "signed_auth": {"kind": kind}}, "k"
+        )

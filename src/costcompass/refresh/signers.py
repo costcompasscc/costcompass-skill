@@ -44,6 +44,48 @@ def fixed_headers_signer(headers: dict[str, str]) -> RequestSigner:
     return lambda _target, _body: headers
 
 
+def _qc_hmac_v1_signer(
+    signed: dict[str, Any], api_key: str, _plan_received_at_sec: int | None
+) -> RequestSigner:
+    # One timestamp covers the whole plan (v1's ``_headers()`` behaviour).
+    return fixed_headers_signer(sign_quantconnect_hmac_v1(signed, api_key))
+
+
+def _ovh_v1_signer(
+    signed: dict[str, Any], api_key: str, plan_received_at_sec: int | None
+) -> RequestSigner:
+    # Reject a malformed credential now, before any request is built.
+    _split_ovh_credential(api_key)
+    received = plan_received_at_sec if plan_received_at_sec is not None else _now_sec()
+    offset = int(signed["server_now"]) - received
+    return lambda target, body: sign_ovh_v1(
+        signed, api_key, target, body, _now_sec() + offset
+    )
+
+
+#: Every ``signed_auth.kind`` this relay can sign with, keyed to its builder.
+#: ``build_plan_signer`` dispatches through this table, so
+#: ``IMPLEMENTED_SIGNER_KINDS`` cannot drift from what actually signs — Python
+#: has no compile-time exhaustiveness check like the browser's
+#: ``Record<SignedAuth["kind"], true>``, so the set is derived, not listed twice.
+_SIGNER_BUILDERS: dict[
+    str, Callable[[dict[str, Any], str, int | None], RequestSigner]
+] = {
+    "qc_hmac_v1": _qc_hmac_v1_signer,
+    "ovh_v1": _ovh_v1_signer,
+}
+IMPLEMENTED_SIGNER_KINDS: frozenset[str] = frozenset(_SIGNER_BUILDERS)
+
+
+def supports_signer_kind(kind: object) -> bool:
+    """Can this relay sign with ``kind``? A missing or non-string kind cannot.
+
+    The orchestrator reads it to skip a plan whose signer this client has not
+    learned BEFORE resolving any credential — the same version lag
+    ``SKIP_UNSUPPORTED_KIND`` covers one level up, for credential routing."""
+    return isinstance(kind, str) and kind in IMPLEMENTED_SIGNER_KINDS
+
+
 def build_plan_signer(
     plan: dict[str, Any], api_key: str, plan_received_at_sec: int | None = None
 ) -> RequestSigner:
@@ -61,20 +103,11 @@ def build_plan_signer(
             }
         )
     kind = signed.get("kind")
-    if kind == "qc_hmac_v1":
-        # One timestamp covers the whole plan (v1's ``_headers()`` behaviour).
-        return fixed_headers_signer(sign_quantconnect_hmac_v1(signed, api_key))
-    if kind == "ovh_v1":
-        # Reject a malformed credential now, before any request is built.
-        _split_ovh_credential(api_key)
-        received = (
-            plan_received_at_sec if plan_received_at_sec is not None else _now_sec()
-        )
-        offset = int(signed["server_now"]) - received
-        return lambda target, body: sign_ovh_v1(
-            signed, api_key, target, body, _now_sec() + offset
-        )
-    raise ValueError(f"unsupported signed_auth kind: {kind!r}")
+    if not supports_signer_kind(kind):
+        # The orchestrator's pre-flight skips such a plan before a credential is
+        # resolved; this stays as the backstop for any other caller.
+        raise ValueError(f"unsupported signed_auth kind: {kind!r}")
+    return _SIGNER_BUILDERS[kind](signed, api_key, plan_received_at_sec)
 
 
 def _now_sec() -> int:

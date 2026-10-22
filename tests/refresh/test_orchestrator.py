@@ -658,10 +658,11 @@ def test_oauth_mint_without_a_resolver_fails():
         orchestrator._resolve_credential(entry, v, None)
 
 
-def _run_one_entry_capture(blob, run, response_json):
+def _run_one_entry_capture(blob, run, response_json, captured=None):
     """Drive ``run()`` against a single-entry fetch-run, capturing the submitted
-    /responses payload. Returns (outcomes, captured_responses_payload)."""
-    captured: dict = {}
+    /responses payload. Returns (outcomes, captured_responses_payload). Pass
+    ``captured`` to also see whether the run was finalized."""
+    captured = {} if captured is None else captured
 
     def api_handler(request: httpx.Request) -> httpx.Response:
         p, m = request.url.path, request.method
@@ -675,6 +676,7 @@ def _run_one_entry_capture(blob, run, response_json):
             captured["responses"] = json.loads(request.content)
             return httpx.Response(200, json=response_json)
         if "/finalize" in p:
+            captured["finalized"] = True
             return httpx.Response(
                 200, json={"run_id": "run-1", "status": "x", "providers": []}
             )
@@ -716,6 +718,70 @@ def test_keyless_card_submits_no_credentials_skip():
     assert r["synthetic"] is True
     assert r["synthetic_reason"] == "no_credentials"
     assert outcomes[0].state == "skipped"
+
+
+def _program_plan_with_unknown_nested_step():
+    return {
+        "requests": [],
+        "auth_header": "Authorization",
+        "auth_scheme": "Bearer",
+        "program": {
+            "purpose": "usage",
+            "steps": [
+                {
+                    "kind": "for_each",
+                    "over": "ids",
+                    "as_binding": "id",
+                    "steps": [{"kind": "mystery_step"}],
+                }
+            ],
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("plan_patch", "missing"),
+    [
+        (
+            {"signed_auth": {"kind": "mystery_signer_v9"}},
+            "signed_auth kind 'mystery_signer_v9'",
+        ),
+        (_program_plan_with_unknown_nested_step(), "program step kind 'mystery_step'"),
+    ],
+    ids=["unknown-signer", "unknown-step-inside-for-each"],
+)
+def test_unsupported_plan_kind_skips_before_resolving_a_credential(
+    monkeypatch, plan_patch, missing
+):
+    # A plan naming a signer or step this client has not learned is a version
+    # lag: ONE benign unsupported_plan_kind synthetic, submitted before any
+    # credential is resolved (no vault lookup, no OAuth mint) and with no broker
+    # forward — ``broker=object()`` would raise on any call. The vault holds no
+    # key for this unmarked card, so reaching the resolver would also have
+    # turned this into a 401. The run must still finalize.
+    def no_resolve(*_a, **_k):
+        raise AssertionError("credential resolved for an unrunnable plan")
+
+    monkeypatch.setattr(orchestrator, "_resolve_credential", no_resolve)
+    run = _flat_run()
+    run["fetches"][0]["plan"].update(plan_patch)
+    captured: dict = {}
+    outcomes, submitted = _run_one_entry_capture(
+        _vault_blob([]),
+        run,
+        {"state": "skipped", "events_ingested": 0},
+        captured,
+    )
+    assert len(submitted["responses"]) == 1
+    r = submitted["responses"][0]
+    assert r["status"] == 204
+    assert r["synthetic"] is True
+    assert r["synthetic_reason"] == "unsupported_plan_kind"
+    assert base64.b64decode(r["body_b64"]).decode() == (
+        f"{missing} is not supported by this client — update it"
+    )
+    assert outcomes[0].state == "skipped"
+    assert captured.get("finalized") is True
 
 
 def test_unmarked_vault_miss_submits_a_401_and_fails_the_card():

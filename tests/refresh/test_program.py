@@ -473,3 +473,38 @@ def test_string_list_extract_refuses_anything_but_safe_ids(items):
     body = base64.b64encode(items).decode()
     rules = [{"path": "", "as_binding": "bills", "coerce": "string_list"}]
     assert program._apply_extract(rules, body, scope) == "bad_list"
+
+
+# One well-formed step per implemented kind. ``_run_steps`` dispatches through
+# the same table ``IMPLEMENTED_STEP_KINDS`` is derived from, so this pins the
+# observable half: every kind the orchestrator's pre-flight lets through runs
+# as itself and never reaches the "unsupported step kind" refusal.
+_ONE_STEP_OF_KIND = {
+    "request": _bq_program()["steps"][0],
+    # An empty ``until`` is already satisfied, so the poll ends without a
+    # forward.
+    "poll": {**_bq_program()["steps"][1], "until": {"any_of": []}},
+    "for_each": {"kind": "for_each", "over": "ids", "as_binding": "id", "steps": []},
+}
+
+
+def test_implemented_step_kinds_match_the_table():
+    assert set(_ONE_STEP_OF_KIND) == program.IMPLEMENTED_STEP_KINDS
+
+
+@pytest.mark.parametrize("kind", sorted(program.IMPLEMENTED_STEP_KINDS))
+def test_every_implemented_step_kind_dispatches(kind):
+    broker = FakeBroker([env(200, {"jobId": "j1"})])
+    prog = {"purpose": "billing", "bindings": {}, "steps": [_ONE_STEP_OF_KIND[kind]]}
+    out = program.run_program(prog, NO_AUTH, "tok", broker)
+    for r in out:
+        body = base64.b64decode(r.get("body_b64") or r.get("body") or "")
+        assert b"unsupported step kind" not in body
+
+
+def test_first_unsupported_step_kind_recurses_and_renders_like_the_browser():
+    nested = [{"kind": "for_each", "steps": [{"kind": "request"}, {"kind": "x9"}]}]
+    assert program.first_unsupported_step_kind(nested) == "x9"
+    assert program.first_unsupported_step_kind([{}]) == "undefined"
+    assert program.first_unsupported_step_kind([{"kind": None}]) == "null"
+    assert program.first_unsupported_step_kind(list(_ONE_STEP_OF_KIND.values())) is None
