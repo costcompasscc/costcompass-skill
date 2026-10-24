@@ -224,5 +224,7 @@ ${CLAUDE_PLUGIN_ROOT}/bin/costcompass mtd <service> refresh --vault --json # one
 
 A refresh reports a per-provider outcome list plus the refreshed MTD; a card
 shown as `skipped — no-days-need-fetching` is the normal 10-minute debounce, not
-an error. After a refresh, report which providers ingested events and the new
-MTD.
+an error. A card shown as `refreshing` is still being fetched on the server
+side when the refresh stopped waiting; its result lands on its own, so say it
+is still updating, not that it failed. After a refresh, report which providers
+ingested events and the new MTD.

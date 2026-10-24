@@ -111,11 +111,14 @@ only fixes is a patch bump.
   _shape_ (flat vs `program`, direct vault entry vs minted), never on a
   provider id literal. **Credential routing is server-authored**: each
   fetch-run entry carries a `credential` object
-  (`{kind: "vault_key" | "oauth_mint" | "oauth_installation_grant",
+  (`{kind: "vault_key" | "oauth_mint" | "oauth_installation_grant" | "broker_queued",
 sentinel_key?, mint_path?, grant_path?}`) the App Server builds from the
-  plugin's `credential_routing()`. The CLI executes every kind above (direct
-  vault entry first, then `oauth_mint`, then the two-leg
-  `oauth_installation_grant`) and skips any kind it does not know with an
+  plugin's `credential_routing()`. The CLI executes every kind above except
+  `broker_queued` (direct vault entry first, then `oauth_mint`, then the
+  two-leg `oauth_installation_grant`). A `broker_queued` entry is run by the
+  provider's broker, not here: the CLI submits nothing for it and, after
+  finalizing, polls `GET /fetch-runs/{id}` until it ends. It skips any kind it
+  does not know with an
   `unsupported_credential_kind` synthetic — decided by the kind alone, never
   by the `subscription_only` marker, which answers a question about
   `vault_key` cards only. Adding an OAuth provider — or a new credential

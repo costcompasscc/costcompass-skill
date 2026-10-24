@@ -281,6 +281,26 @@ SKIP_NO_CREDENTIALS = "no_credentials"
 SKIP_SENTINEL_VANISHED = "oauth_sentinel_vanished"
 SKIP_ROTATION_SUPERSEDED = "oauth_rotation_superseded"
 SKIP_UNSUPPORTED_KIND = "unsupported_credential_kind"
+
+# Gap between two reads of a run that is waiting on its broker-owned entries.
+# The server's status route allows about one read every 0.5 s per user, so 2 s
+# leaves room for other relays. Same figure as the browser's
+# ``BROKER_POLL_INTERVAL_MS`` and the macOS ``brokerPollInterval``.
+BROKER_POLL_INTERVAL_S = 2.0
+
+# Every terminal per-entry state the server reports. A followed entry in any
+# other state has not ended yet.
+_TERMINAL_STATES = frozenset(
+    {
+        "success",
+        "failed",
+        "rate_limited",
+        "reauth_required",
+        "skipped",
+        "cancelled",
+        "forward_cap_exceeded",
+    }
+)
 SKIP_UNSUPPORTED_PLAN = "unsupported_plan_kind"
 
 # Which marker each aborted rotation reports. Keyed lookup, not a conditional:
@@ -750,6 +770,66 @@ def unsupported_plan_kind(plan: dict[str, Any]) -> str | None:
     return None
 
 
+def _is_broker_owned(entry: dict[str, Any]) -> bool:
+    """True when the provider's broker, not this relay, runs the entry
+    (``broker_queued``). It has no credential to resolve and nothing to submit:
+    the server refuses ``/responses`` for it, and the run follows it instead."""
+    return (entry.get("credential") or {}).get("kind") == "broker_queued"
+
+
+def _is_followed(entry: dict[str, Any]) -> bool:
+    """A pending broker-owned entry: the run follows it instead of running it.
+    A broker-owned entry the server already skipped is echoed like any other."""
+    return entry.get("state", "pending") == "pending" and _is_broker_owned(entry)
+
+
+def _follow_run(
+    client: api.Client,
+    initial: dict[str, Any],
+    budget_allows: Callable[[float], bool],
+    sleep: Callable[[float], None],
+) -> dict[str, Any]:
+    """Poll a run whose finalize answered ``running`` until its broker-owned
+    entries end, the next wait would pass the run budget, or a poll fails.
+
+    Returns the last status read. A run still ``running`` then is reported as
+    such, never as a failure: the server ends the job on its own. A failed
+    poll stops following rather than retrying, because every relay-run entry
+    is already submitted. Mirrors the browser's ``followRun``.
+    """
+    current = initial
+    while current.get("status") == "running" and budget_allows(BROKER_POLL_INTERVAL_S):
+        sleep(BROKER_POLL_INTERVAL_S)
+        try:
+            current = client.get_fetch_run(initial["run_id"])
+        except api.ApiError:
+            break
+    return current
+
+
+def _followed_outcome(entry: dict[str, Any], run: dict[str, Any]) -> EntryOutcome:
+    """A followed broker-owned entry's outcome, from the last run status read.
+    Not yet ended reads as ``refreshing``, the browser's word for it."""
+    provider = entry["provider_id"]
+    instance = entry.get("instance_key", "")
+    label = entry.get("instance_label")
+    for p in run.get("providers", []):
+        if (
+            p.get("provider_id") == provider
+            and (p.get("instance_key") or "") == instance
+            and p.get("state") in _TERMINAL_STATES
+        ):
+            return EntryOutcome(
+                provider,
+                instance,
+                p["state"],
+                events_ingested=p.get("events_ingested", 0),
+                error_message=p.get("error_message"),
+                instance_label=label,
+            )
+    return EntryOutcome(provider, instance, "refreshing", instance_label=label)
+
+
 def _process_entry(
     entry: dict[str, Any],
     vault: vault_mod.Vault,
@@ -764,12 +844,15 @@ def _process_entry(
     instance = entry.get("instance_key", "")
     label = entry.get("instance_label")
     plan = entry.get("plan")
-    if plan is None:
+    # The server already decided this entry does not run (debounce, a failed
+    # plan, a broker-owned card that is already refreshing). Echo its state;
+    # its sentence before its marker, as the browser does.
+    if plan is None or entry.get("state", "pending") != "pending":
         return EntryOutcome(
             provider,
             instance,
             entry.get("state", "skipped"),
-            error_message=entry.get("skip_reason") or entry.get("error_message"),
+            error_message=entry.get("error_message") or entry.get("skip_reason"),
             instance_label=label,
         )
 
@@ -933,6 +1016,7 @@ def _run(
     progress_write: ProgressWrite = _stdout_write,
     concurrency: int = DEFAULT_CONCURRENCY,
     now: Callable[[], float] = time.time,
+    sleep: Callable[[float], None] = time.sleep,
     run_budget_s: float = RUN_BUDGET_S,
 ) -> RefreshResult:
     owns_client = client is None
@@ -1006,8 +1090,15 @@ def _run(
             # start — that can be minutes later on a long run.
             plans_received_at_sec = int(time.time())
             run_id = run_data["run_id"]
+            fetches = list(run_data.get("fetches", []))
+            # A pending broker-owned entry is not this relay's to run: the
+            # provider's broker runs its job, and the run is followed after
+            # finalizing instead (invariant 15 in the browser's refresh
+            # CLAUDE.md).
+            followed = [e for e in fetches if _is_followed(e)]
+            relayed = [e for e in fetches if not _is_followed(e)]
             outcomes, stopped = _run_with_concurrency(
-                list(run_data.get("fetches", [])),
+                relayed,
                 concurrency,
                 lambda entry: _process_entry(
                     entry,
@@ -1083,7 +1174,10 @@ def _run(
                     "Refresh took too long and was stopped. Some providers may "
                     "not have been updated — try again." + stranded
                 )
-            client.finalize_run(run_id)
+            finalized = client.finalize_run(run_id)
+            if finalized.get("status") == "running":
+                finalized = _follow_run(client, finalized, budget_allows, sleep)
+            outcomes += [_followed_outcome(e, finalized) for e in followed]
 
         for o in outcomes:
             # Prefer the human label; the raw instance_key UUID is an internal

@@ -292,6 +292,11 @@ class Client:
     def submit_responses(self, run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         return self._json("POST", f"/fetch-runs/{run_id}/responses", json=payload)
 
+    def get_fetch_run(self, run_id: str) -> dict[str, Any]:
+        """A run's current status, in the finalize shape. How a relay follows
+        a broker-owned entry it cannot report itself."""
+        return self._json("GET", f"/fetch-runs/{run_id}")
+
     def finalize_run(self, run_id: str, cancelled: bool = False) -> dict[str, Any]:
         """Close the run, retrying once when the outcome is unknown.
 
