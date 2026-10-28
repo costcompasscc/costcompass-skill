@@ -452,13 +452,24 @@ def _details_headline(
     lines = [
         f"{safe_text(display_name)} — "
         f"{money(ct.amount(metrics['mtd'], currency), currency, locale)} month-to-date",
+    ]
+    # Already off month-to-date; burn and forecast are before credits.
+    credits = _credit_amount(summary, "credits", currency)
+    if credits > 0:
+        lines.append(f"  credits applied  : {money(credits, currency, locale)}")
+    lines += [
         f"  7-day daily burn : "
         f"{money(ct.amount(metrics['burn_rate_7day'], currency), currency, locale)}",
         f"  forecast (next)  : "
         f"{money(ct.amount(metrics['forecast'], currency), currency, locale)}",
         f"  days remaining   : {summary.get('days_remaining', 0)}",
         f"  previous month   : "
-        f"{money(ct.amount(metrics['previous_month'], currency), currency, locale)}",
+        f"{money(ct.amount(metrics['previous_month'], currency), currency, locale)}"
+        + _after_credits(
+            _credit_amount(summary, "previous_month_credits", currency),
+            currency,
+            locale,
+        ),
     ]
     if summary.get("newest_fetched_at"):
         lines.append(f"  data as of       : {safe_text(summary['newest_fetched_at'])}")
@@ -466,6 +477,23 @@ def _details_headline(
     if note:
         lines.append(f"  {note}")
     return lines
+
+
+def _credit_amount(summary: dict[str, Any], field: str, currency: str) -> float:
+    """A summary's credit map in one currency; absent (an older server) is none."""
+    return (
+        ct.amount(required_totals(summary, field), currency)
+        if field in summary
+        else 0.0
+    )
+
+
+def _after_credits(credits: float, currency: str, locale: str) -> str:
+    """ " (after $X in credits)" beside a figure credits already came off, so it
+    reads against the forecast, which is before credits."""
+    if credits <= 0:
+        return ""
+    return f" (after {money(credits, currency, locale)} in credits)"
 
 
 def _model_lines(

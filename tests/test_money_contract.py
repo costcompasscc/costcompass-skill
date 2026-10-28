@@ -423,3 +423,37 @@ def test_refresh_json_refuses_an_outcome_it_cannot_encode(monkeypatch):
     assert result.stdout == ""
     assert "JSON cannot" in result.stderr
     assert "Traceback" not in result.output
+
+
+def test_details_name_the_credit_applied_when_there_is_one():
+    summary = {**SUMMARY, "credits": {"USD": 1.25}}
+    lines = render.format_details("Example", summary, []).splitlines()
+    assert "  credits applied  : $1.25" in lines
+
+
+@pytest.mark.parametrize("credits", [MISSING, {}, {"USD": 0}])
+def test_details_say_nothing_about_credits_when_there_were_none(credits):
+    summary = dict(SUMMARY)
+    if credits is not MISSING:
+        summary["credits"] = credits
+    assert "credits applied" not in render.format_details("Example", summary, [])
+
+
+def test_details_say_what_credits_took_off_last_month():
+    summary = {**SUMMARY, "previous_month_credits": {"USD": 3.5}}
+    lines = render.format_details("Example", summary, []).splitlines()
+    (line,) = [ln for ln in lines if ln.startswith("  previous month")]
+    assert line.endswith(" (after $3.50 in credits)")
+
+
+@pytest.mark.parametrize("credits", [MISSING, {}, {"USD": 0}])
+def test_details_leave_last_month_bare_without_credits(credits):
+    summary = dict(SUMMARY)
+    if credits is not MISSING:
+        summary["previous_month_credits"] = credits
+    assert "in credits)" not in render.format_details("Example", summary, [])
+
+
+def test_details_refuse_a_credits_map_they_cannot_read():
+    with pytest.raises(api.ApiError, match="credits"):
+        render.format_details("Example", {**SUMMARY, "credits": None}, [])

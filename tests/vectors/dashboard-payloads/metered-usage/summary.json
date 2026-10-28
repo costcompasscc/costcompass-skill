@@ -2,6 +2,7 @@
   "burn_rate_7day": {
     "USD": 4.8863
   },
+  "credits": {},
   "days_remaining": 15,
   "enabled_provider_count": 2,
   "forecast": {
@@ -23,6 +24,7 @@
   "previous_month": {
     "USD": 43.5
   },
+  "previous_month_credits": {},
   "spend_gap_count": 0,
   "stale_cards": [],
   "tokens": null

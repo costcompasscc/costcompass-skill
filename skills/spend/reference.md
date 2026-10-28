@@ -179,8 +179,17 @@ the valid names — pass them back to the user; don't invent a mapping.
 - `mtd` — the headline month-to-date figure, per currency.
 - `burn_rate_7day` — total daily burn over the last 7 days, **including
   subscriptions** (e.g. a Claude Max plan fee dominates it), per currency.
-- `forecast` — projected end-of-month total, per currency.
-- `previous_month` — last calendar month's spend, per currency.
+- `forecast` — projected spend for **next** calendar month at the recent pace,
+  per currency. It is **before credits**, as is `burn_rate_7day`.
+- `previous_month` — last calendar month's spend, per currency, after credits.
+- `credits` / `previous_month_credits` — what provider credits (a trial or
+  promotional credit) paid this month and last month, positive, per currency.
+  Already subtracted from `mtd` and `previous_month`: `mtd` is what the user
+  pays. Add them back (`mtd + credits`) before comparing with `forecast`, which
+  never subtracts credits. Absent or empty means no credits.
+- `models[].is_credit` — a breakdown line that is a credit: a negative amount
+  under "Credits" that is part of the card's total. Present it as money a
+  credit covered, never as a charge.
 - `per_provider_burn` (total view only) — per-provider **metered-usage** daily
   burn, excluding subscriptions; a UI min-runway helper. Don't present it as a
   breakdown of `burn_rate_7day` — they intentionally differ.

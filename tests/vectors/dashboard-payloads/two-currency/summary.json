@@ -3,6 +3,7 @@
     "LKR": 1928.5714,
     "USD": 3.9629
   },
+  "credits": {},
   "days_remaining": 15,
   "enabled_provider_count": 2,
   "forecast": {
@@ -25,6 +26,7 @@
     }
   },
   "previous_month": {},
+  "previous_month_credits": {},
   "spend_gap_count": 0,
   "stale_cards": [],
   "tokens": null

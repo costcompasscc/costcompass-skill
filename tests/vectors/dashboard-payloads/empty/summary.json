@@ -1,5 +1,6 @@
 {
   "burn_rate_7day": {},
+  "credits": {},
   "days_remaining": 15,
   "enabled_provider_count": 0,
   "forecast": {},
@@ -8,6 +9,7 @@
   "newest_fetched_at": null,
   "per_provider_burn": {},
   "previous_month": {},
+  "previous_month_credits": {},
   "spend_gap_count": 0,
   "stale_cards": [],
   "tokens": null

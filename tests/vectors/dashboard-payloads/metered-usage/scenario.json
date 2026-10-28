@@ -1,5 +1,5 @@
 {
-  "_comment": "AUTHORED. The ordinary single-currency account, and the only scenario that exercises summary, per-provider burn, trend, model breakdown, card ordering and report reconciliation together. Two providers so ordering is observable; several models so the per-model breakdown renders; spend inside the trailing-7-day window, earlier in the current month, and in the previous month, so burn_rate_7day, mtd_usd and previous_month_usd are three distinct non-zero numbers rather than the same figure three times. Against the frozen clock 2026-04-15T12:00:00Z the 7-day window is 2026-04-09..2026-04-15 inclusive.",
+  "_comment": "AUTHORED. The ordinary single-currency account, and the only scenario that exercises summary, per-provider burn, trend, model breakdown, card ordering and report reconciliation together. Two providers so ordering is observable; several models so the per-model breakdown renders; spend inside the trailing-7-day window, earlier in the current month, and in the previous month, so burn_rate_7day, mtd_usd and previous_month_usd are three distinct non-zero numbers rather than the same figure three times. Against the frozen clock 2026-04-15T12:00:00Z the 7-day window is the full days 2026-04-08..2026-04-14 inclusive.",
   "name": "metered-usage",
   "seed": {
     "cards": [
